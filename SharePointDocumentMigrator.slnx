@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SharePointDocumentMigrator/SharePointDocumentMigrator.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SharePointDocumentMigrator.Tests/SharePointDocumentMigrator.Tests.csproj" />
+  </Folder>
+</Solution>
