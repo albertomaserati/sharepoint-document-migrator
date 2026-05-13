@@ -96,24 +96,27 @@ public sealed class MigrationOrchestrator
                     continue;
                 }
 
-                var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
-                var selectedMetadata = _fieldSelector.SelectUpdatableFields(sourceFields, schemaValidation.WritableColumns);
-
-                if (selectedMetadata.Fields.Count > 0)
+                if (_migrationOptions.EnableMetadataMigration)
                 {
-                    var targetListItemId = await _graphApiClient.GetListItemIdForDriveItemAsync(
-                        targetContext.Drive.Id,
-                        uploadResult.Item.Id,
-                        cancellationToken);
+                    var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
+                    var selectedMetadata = _fieldSelector.SelectUpdatableFields(sourceFields, schemaValidation.WritableColumns);
 
-                    await _graphApiClient.UpdateListItemFieldsAsync(
-                        targetContext.Site.Id,
-                        targetContext.List.Id,
-                        targetListItemId,
-                        selectedMetadata.Fields,
-                        cancellationToken);
+                    if (selectedMetadata.Fields.Count > 0)
+                    {
+                        var targetListItemId = await _graphApiClient.GetListItemIdForDriveItemAsync(
+                            targetContext.Drive.Id,
+                            uploadResult.Item.Id,
+                            cancellationToken);
 
-                    report.RecordMetadataUpdated();
+                        await _graphApiClient.UpdateListItemFieldsAsync(
+                            targetContext.Site.Id,
+                            targetContext.List.Id,
+                            targetListItemId,
+                            selectedMetadata.Fields,
+                            cancellationToken);
+
+                        report.RecordMetadataUpdated();
+                    }
                 }
 
                 report.RecordMigratedFile(targetFilePath);

@@ -12,6 +12,8 @@ public sealed class MigrationOptions
 
     public bool OverwriteExistingFiles { get; init; }
 
+    public bool EnableMetadataMigration { get; init; } = true;
+
     public int MaxRetryCount { get; init; } = 5;
 
     public int UploadChunkSizeKiB { get; init; } = 3200;
