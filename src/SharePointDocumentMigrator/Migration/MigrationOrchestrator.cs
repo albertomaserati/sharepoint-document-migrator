@@ -37,8 +37,10 @@ public sealed class MigrationOrchestrator
         _logger.LogInformation("Resolving target SharePoint location.");
         var targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
 
-        var schemaValidation = await _schemaComparer.Compare(sourceContext.Columns, targetContext.Columns, _migrationOptions.MetadataFieldMappings);
-        if (!schemaValidation.IsValid)
+        SchemaValidationResult? schemaValidation = null;
+        schemaValidation = await _schemaComparer.Compare(sourceContext.Columns, targetContext.Columns, _migrationOptions.MetadataFieldMappings);
+
+        if (!_migrationOptions.DryRun && !schemaValidation.IsValid)
         {
             throw new InvalidOperationException(
                 "Source and target libraries are not schema-compatible:" + Environment.NewLine
