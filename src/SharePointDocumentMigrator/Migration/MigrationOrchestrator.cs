@@ -101,7 +101,7 @@ public sealed class MigrationOrchestrator
                 if (_migrationOptions.EnableMetadataMigration)
                 {
                     var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
-                    var selectedMetadata = _fieldSelector.SelectUpdatableFields(sourceFields, schemaValidation.WritableColumns, _migrationOptions.MetadataFieldMappings);
+                    var selectedMetadata = _fieldSelector.SelectUpdatableFields(sourceFields, schemaValidation!.WritableColumns, _migrationOptions.MetadataFieldMappings);
 
                     if (selectedMetadata.Fields.Count > 0)
                     {
