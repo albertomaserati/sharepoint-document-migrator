@@ -37,7 +37,7 @@ public sealed class MigrationOrchestrator
         _logger.LogInformation("Resolving target SharePoint location.");
         var targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
 
-        var schemaValidation = _schemaComparer.Compare(sourceContext.Columns, targetContext.Columns, _migrationOptions.MetadataFieldMappings);
+        var schemaValidation = await _schemaComparer.Compare(sourceContext.Columns, targetContext.Columns, _migrationOptions.MetadataFieldMappings);
         if (!schemaValidation.IsValid)
         {
             throw new InvalidOperationException(
