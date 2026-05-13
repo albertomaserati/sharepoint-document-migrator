@@ -14,6 +14,13 @@ public sealed class MigrationOptions
 
     public bool EnableMetadataMigration { get; init; } = true;
 
+    /// <summary>
+    /// Optional mapping between source and target internal field names.
+    /// Fields not listed here are assumed to share the same internal name in both libraries.
+    /// Example: { "CategoriaProgetto": "Category" }
+    /// </summary>
+    public Dictionary<string, string> MetadataFieldMappings { get; init; } = [];
+
     public int MaxRetryCount { get; init; } = 5;
 
     public int UploadChunkSizeKiB { get; init; } = 3200;

@@ -37,7 +37,7 @@ public sealed class MigrationOrchestrator
         _logger.LogInformation("Resolving target SharePoint location.");
         var targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
 
-        var schemaValidation = _schemaComparer.Compare(sourceContext.Columns, targetContext.Columns);
+        var schemaValidation = _schemaComparer.Compare(sourceContext.Columns, targetContext.Columns, _migrationOptions.MetadataFieldMappings);
         if (!schemaValidation.IsValid)
         {
             throw new InvalidOperationException(
@@ -99,7 +99,7 @@ public sealed class MigrationOrchestrator
                 if (_migrationOptions.EnableMetadataMigration)
                 {
                     var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
-                    var selectedMetadata = _fieldSelector.SelectUpdatableFields(sourceFields, schemaValidation.WritableColumns);
+                    var selectedMetadata = _fieldSelector.SelectUpdatableFields(sourceFields, schemaValidation.WritableColumns, _migrationOptions.MetadataFieldMappings);
 
                     if (selectedMetadata.Fields.Count > 0)
                     {
