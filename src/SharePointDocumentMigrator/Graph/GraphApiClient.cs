@@ -12,7 +12,12 @@ using System.Text.Json.Nodes;
 
 namespace SharePointDocumentMigrator.Graph;
 
-public sealed class GraphApiClient
+public sealed class GraphApiClient(
+    HttpClient httpClient,
+    TokenCredential credential,
+    IOptions<AuthenticationOptions> authenticationOptions,
+    IOptions<MigrationOptions> migrationOptions,
+    ILogger<GraphApiClient> logger)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -27,26 +32,12 @@ public sealed class GraphApiClient
         HttpStatusCode.GatewayTimeout
     ];
 
-    private readonly HttpClient _httpClient;
-    private readonly TokenCredential _credential;
-    private readonly AuthenticationOptions _authenticationOptions;
-    private readonly MigrationOptions _migrationOptions;
-    private readonly ILogger<GraphApiClient> _logger;
+    private readonly HttpClient _httpClient = httpClient;
+    private readonly TokenCredential _credential = credential;
+    private readonly AuthenticationOptions _authenticationOptions = authenticationOptions.Value;
+    private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
+    private readonly ILogger<GraphApiClient> _logger = logger;
     private readonly ConcurrentDictionary<string, DriveItemInfo> _folderCache = new(StringComparer.OrdinalIgnoreCase);
-
-    public GraphApiClient(
-        HttpClient httpClient,
-        TokenCredential credential,
-        IOptions<AuthenticationOptions> authenticationOptions,
-        IOptions<MigrationOptions> migrationOptions,
-        ILogger<GraphApiClient> logger)
-    {
-        _httpClient = httpClient;
-        _credential = credential;
-        _authenticationOptions = authenticationOptions.Value;
-        _migrationOptions = migrationOptions.Value;
-        _logger = logger;
-    }
 
     public async Task<ResolvedLibraryContext> ResolveLibraryContextAsync(SharePointLocationOptions options, CancellationToken cancellationToken)
     {
@@ -108,7 +99,7 @@ public sealed class GraphApiClient
         var requestUri = $"sites/{siteId}/lists/{listId}/columns?$select=name,displayName,hidden,readOnly,required,text,choice,number,currency,dateTime,lookup,personOrGroup,boolean,hyperlinkOrPicture,term,calculated";
         var collection = await GetCollectionAsync(requestUri, cancellationToken);
 
-        return collection
+        return [.. collection
             .Select(column => new SharePointColumnDefinition(
                 column["name"]?.GetValue<string>() ?? string.Empty,
                 column["displayName"]?.GetValue<string>() ?? string.Empty,
@@ -116,8 +107,7 @@ public sealed class GraphApiClient
                 column["hidden"]?.GetValue<bool>() ?? false,
                 column["readOnly"]?.GetValue<bool>() ?? false,
                 column["required"]?.GetValue<bool>() ?? false))
-            .Where(column => !string.IsNullOrWhiteSpace(column.InternalName))
-            .ToArray();
+            .Where(column => !string.IsNullOrWhiteSpace(column.InternalName))];
     }
 
     public async Task<DriveItemInfo> GetDriveItemByPathAsync(string driveId, string? relativePath, CancellationToken cancellationToken)
@@ -174,7 +164,7 @@ public sealed class GraphApiClient
     public async Task<JsonObject> GetListItemFieldsAsync(string driveId, string itemId, CancellationToken cancellationToken)
     {
         return await GetJsonAsync($"drives/{driveId}/items/{itemId}/listItem/fields", cancellationToken)
-            ?? new JsonObject();
+            ?? [];
     }
 
     public async Task<string> GetListItemIdForDriveItemAsync(string driveId, string itemId, CancellationToken cancellationToken)

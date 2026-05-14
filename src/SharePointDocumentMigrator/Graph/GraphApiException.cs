@@ -1,18 +1,14 @@
 namespace SharePointDocumentMigrator.Graph;
 
-public sealed class GraphApiException : Exception
+public sealed class GraphApiException(
+    string message,
+    int statusCode,
+    string requestUri,
+    string? responseBody = null) : Exception(message)
 {
-    public GraphApiException(string message, int statusCode, string requestUri, string? responseBody = null)
-        : base(message)
-    {
-        StatusCode = statusCode;
-        RequestUri = requestUri;
-        ResponseBody = responseBody;
-    }
+    public int StatusCode { get; } = statusCode;
 
-    public int StatusCode { get; }
+    public string RequestUri { get; } = requestUri;
 
-    public string RequestUri { get; }
-
-    public string? ResponseBody { get; }
+    public string? ResponseBody { get; } = responseBody;
 }

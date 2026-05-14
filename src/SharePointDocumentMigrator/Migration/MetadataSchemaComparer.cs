@@ -20,7 +20,7 @@ public sealed class MetadataSchemaComparer
         "ContentTypeId"
     };
 
-    public async Task<SchemaValidationResult> Compare(
+    public static async Task<SchemaValidationResult> Compare(
         IReadOnlyList<SharePointColumnDefinition> sourceColumns,
         IReadOnlyList<SharePointColumnDefinition> targetColumns,
         IReadOnlyDictionary<string, string>? fieldMappings = null)

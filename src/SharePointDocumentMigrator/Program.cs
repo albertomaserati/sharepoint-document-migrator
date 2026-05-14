@@ -55,14 +55,14 @@ try
         if (string.IsNullOrWhiteSpace(authOptions.ClientSecret))
             throw new InvalidOperationException("Client secret must be provided when device code authentication is disabled.");
 
-        authOptions.ApplyCustomScopes(new[] { "https://graph.microsoft.com/.default" });
+        authOptions.ApplyCustomScopes("https://graph.microsoft.com/.default");
 
         return new ClientSecretCredential(
                 authOptions.TenantId,
                 authOptions.ClientId,
                 authOptions.ClientSecret);
 
-        // NOTE: this does not work
+        // NOTE: this not works
 
         //return new InteractiveBrowserCredential(
         //    new InteractiveBrowserCredentialOptions
