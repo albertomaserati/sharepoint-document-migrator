@@ -7,20 +7,20 @@ namespace SharePointDocumentMigrator.Migration;
 
 public sealed class MigrationOrchestrator(
     GraphApiClient graphApiClient,
-    MetadataSchemaComparer schemaComparer,
     MetadataFieldSelector fieldSelector,
     IOptions<MigrationOptions> migrationOptions,
     ILogger<MigrationOrchestrator> logger)
 {
     private readonly GraphApiClient _graphApiClient = graphApiClient;
-    private readonly MetadataSchemaComparer _schemaComparer = schemaComparer;
     private readonly MetadataFieldSelector _fieldSelector = fieldSelector;
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
 
+    private MigrationReport _report;
+
     public async Task<MigrationReport> ExecuteAsync(CancellationToken cancellationToken)
     {
-        var report = new MigrationReport(_migrationOptions.DryRun);
+        _report = new MigrationReport(_migrationOptions.DryRun);
 
         _logger.LogInformation("Resolving source and target SharePoint locations.");
         ResolvedLibraryContext sourceContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Source, cancellationToken);
@@ -47,15 +47,15 @@ public sealed class MigrationOrchestrator(
             var targetFolderPath = PathUtilities.CombineRelativePath(targetRoot, folder.RelativePath);
             if (_migrationOptions.DryRun)
             {
-                report.RecordDryRunFolder(targetFolderPath);
+                _report.RecordDryRunFolder(targetFolderPath);
                 continue;
             }
 
             await _graphApiClient.EnsureFolderExistsAsync(targetContext.Drive.Id, targetFolderPath, cancellationToken);
-            report.RecordFolderEnsured();
+            _report.RecordFolderEnsured();
         }
 
-        foreach (var file in inventory.Files)
+        foreach (DriveItemInfo file in inventory.Files)
         {
             var targetFilePath = PathUtilities.CombineRelativePath(targetRoot, file.RelativePath);
 
@@ -64,7 +64,7 @@ public sealed class MigrationOrchestrator(
                 if (_migrationOptions.DryRun)
                 {
                     _logger.LogInformation("Source file name: {SourceFile}. Url: {WebUrl}", file.RelativePath, file.WebUrl);
-                    report.RecordDryRunFile(targetFilePath);
+                    _report.RecordDryRunFile(targetFilePath);
                     continue;
                 }
 
@@ -80,7 +80,7 @@ public sealed class MigrationOrchestrator(
                     temporaryFile.Path,
                     cancellationToken);
 
-                var uploadResult = await _graphApiClient.UploadFileAsync(
+                UploadResult? uploadResult = await _graphApiClient.UploadFileAsync(
                     targetContext.Drive.Id,
                     targetFilePath,
                     temporaryFile.Path,
@@ -89,48 +89,66 @@ public sealed class MigrationOrchestrator(
 
                 if (uploadResult.WasSkipped)
                 {
-                    report.RecordSkippedFile(targetFilePath);
+                    _report.RecordSkippedFile(targetFilePath);
                     continue;
                 }
 
                 if (_migrationOptions.EnableMetadataMigration)
                 {
-                    var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
-                    var selectedMetadata = _fieldSelector.SelectUpdatableFields(
-                        sourceFields,
-                        schemaValidation!.WritableColumns,
-                        _migrationOptions.MetadataFieldMappings);
-
-                    if (selectedMetadata.Fields.Count > 0)
-                    {
-                        var targetListItemId = await _graphApiClient.GetListItemIdForDriveItemAsync(
-                            targetContext.Drive.Id,
-                            uploadResult.Item.Id,
-                            cancellationToken);
-
-                        await _graphApiClient.UpdateListItemFieldsAsync(
-                            targetContext.Site.Id,
-                            targetContext.List.Id,
-                            targetListItemId,
-                            selectedMetadata.Fields,
-                            cancellationToken);
-
-                        report.RecordMetadataUpdated();
-                    }
+                    await ProcessMetadataAsync(
+                        sourceContext,
+                        targetContext,
+                        file,
+                        schemaValidation,
+                        uploadResult,
+                        cancellationToken);
                 }
 
-                report.RecordMigratedFile(targetFilePath);
+                _report.RecordMigratedFile(targetFilePath);
             }
             catch (Exception exception)
             {
                 _logger.LogError(exception, "Failed to migrate '{RelativePath}'.", file.RelativePath);
-                report.RecordFailure(file.RelativePath, exception.Message);
+                _report.RecordFailure(file.RelativePath, exception.Message);
             }
         }
 
-        _logger.LogInformation(report.PrintReport());
+        _logger.LogInformation(_report.PrintReport());
 
-        return report;
+        return _report;
+    }
+
+    private async Task ProcessMetadataAsync(
+        ResolvedLibraryContext sourceContext,
+        ResolvedLibraryContext targetContext,
+        DriveItemInfo file,
+        SchemaValidationResult schemaValidation,
+        UploadResult uploadResult,
+
+        CancellationToken cancellationToken)
+    {
+        var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
+        var selectedMetadata = _fieldSelector.SelectUpdatableFields(
+            sourceFields,
+            schemaValidation!.WritableColumns,
+            _migrationOptions.MetadataFieldMappings);
+
+        if (selectedMetadata.Fields.Count > 0)
+        {
+            var targetListItemId = await _graphApiClient.GetListItemIdForDriveItemAsync(
+                targetContext.Drive.Id,
+                uploadResult.Item.Id,
+                cancellationToken);
+
+            await _graphApiClient.UpdateListItemFieldsAsync(
+                targetContext.Site.Id,
+                targetContext.List.Id,
+                targetListItemId,
+                selectedMetadata.Fields,
+                cancellationToken);
+
+            _report.RecordMetadataUpdated();
+        }
     }
 
     private async Task<LibraryInventory> EnumerateAsync(string driveId, string sourceRoot, CancellationToken cancellationToken)

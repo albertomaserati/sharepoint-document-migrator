@@ -8,7 +8,7 @@ using SharePointDocumentMigrator.Graph;
 using SharePointDocumentMigrator.Migration;
 using SharePointDocumentMigrator.Options;
 
-var cancellationSource = new CancellationTokenSource();
+using var cancellationSource = new CancellationTokenSource();
 Console.CancelKeyPress += (_, args) =>
 {
     args.Cancel = true;
@@ -91,16 +91,16 @@ try
 }
 catch (OptionsValidationException exception)
 {
-    Console.Error.WriteLine("Configuration validation failed:");
+    await Console.Error.WriteLineAsync("Configuration validation failed:");
     foreach (var failure in exception.Failures)
     {
-        Console.Error.WriteLine($" - {failure}");
+        await Console.Error.WriteLineAsync($" - {failure}");
     }
 
     return 1;
 }
 catch (Exception exception)
 {
-    Console.Error.WriteLine(exception.Message);
+    await Console.Error.WriteLineAsync(exception.Message);
     return 1;
 }
