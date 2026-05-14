@@ -1,8 +1,4 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/SharePointDocumentMigrator/SharePointDocumentMigrator.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/SharePointDocumentMigrator.Tests/SharePointDocumentMigrator.Tests.csproj" />
-  </Folder>
+  <Project Path="SharePointDocumentMigrator.Tests/SharePointDocumentMigrator.Tests.csproj" />
+  <Project Path="SharePointDocumentMigrator/SharePointDocumentMigrator.csproj" />
 </Solution>
