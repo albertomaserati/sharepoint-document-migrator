@@ -16,7 +16,7 @@ public sealed class MigrationOrchestrator(
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
 
-    private MigrationReport _report;
+    private MigrationReport _report = null!;
 
     public async Task<MigrationReport> ExecuteAsync(CancellationToken cancellationToken)
     {
@@ -47,6 +47,7 @@ public sealed class MigrationOrchestrator(
             var targetFolderPath = PathUtilities.CombineRelativePath(targetRoot, folder.RelativePath);
             if (_migrationOptions.DryRun)
             {
+                _logger.LogInformation("[DRY RUN] Folder found — source: {SourcePath} | target: {TargetPath}", folder.RelativePath, targetFolderPath);
                 _report.RecordDryRunFolder(targetFolderPath);
                 continue;
             }
