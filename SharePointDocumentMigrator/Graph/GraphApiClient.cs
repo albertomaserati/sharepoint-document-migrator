@@ -415,11 +415,12 @@ public sealed class GraphApiClient(
         CancellationToken cancellationToken,
         bool allowNotFound = false)
     {
-        using var response = await SendGraphAsync(HttpMethod.Get, requestUri, contentFactory: null, cancellationToken, allowNotFound);
-        if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
+        using var response = await SendGraphAsync(
+            HttpMethod.Get,
+            requestUri,
+            contentFactory: null,
+            cancellationToken,
+            allowNotFound);
 
         return await DeserializeObjectAsync(response, cancellationToken);
     }
