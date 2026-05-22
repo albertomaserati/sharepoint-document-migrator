@@ -39,7 +39,9 @@ public sealed class GraphApiClient(
     private readonly ILogger<GraphApiClient> _logger = logger;
     private readonly ConcurrentDictionary<string, DriveItemInfo> _folderCache = new(StringComparer.OrdinalIgnoreCase);
 
-    public async Task<ResolvedLibraryContext> ResolveLibraryContextAsync(SharePointLocationOptions options, CancellationToken cancellationToken)
+    public async Task<ResolvedLibraryContext> ResolveLibraryContextAsync(
+        SharePointLocationOptions options,
+        CancellationToken cancellationToken)
     {
         var site = await ResolveSiteAsync(options, cancellationToken);
         var list = await ResolveListAsync(site.Id, options.LibraryName, cancellationToken);
@@ -49,7 +51,9 @@ public sealed class GraphApiClient(
         return new ResolvedLibraryContext(site, list, drive, columns);
     }
 
-    public async Task<SiteInfo> ResolveSiteAsync(SharePointLocationOptions options, CancellationToken cancellationToken)
+    public async Task<SiteInfo> ResolveSiteAsync(
+        SharePointLocationOptions options,
+        CancellationToken cancellationToken)
     {
         var sitePath = PathUtilities.NormalizeSitePath(options.SitePath);
 
@@ -64,7 +68,10 @@ public sealed class GraphApiClient(
             document["webUrl"]?.GetValue<string>() ?? string.Empty);
     }
 
-    public async Task<ListInfo> ResolveListAsync(string siteId, string libraryName, CancellationToken cancellationToken)
+    public async Task<ListInfo> ResolveListAsync(
+        string siteId,
+        string libraryName,
+        CancellationToken cancellationToken)
     {
         var requestUri = $"sites/{siteId}/lists?$select=id,displayName,webUrl";
         var collection = await GetCollectionAsync(requestUri, cancellationToken);
@@ -83,7 +90,10 @@ public sealed class GraphApiClient(
             listNode["webUrl"]?.GetValue<string>() ?? string.Empty);
     }
 
-    public async Task<DriveInfo> ResolveDriveAsync(string siteId, string listId, CancellationToken cancellationToken)
+    public async Task<DriveInfo> ResolveDriveAsync(
+        string siteId,
+        string listId,
+        CancellationToken cancellationToken)
     {
         var document = await GetJsonAsync($"sites/{siteId}/lists/{listId}/drive?$select=id,name,webUrl", cancellationToken)
             ?? throw new InvalidOperationException("Graph response missing drive payload.");
@@ -94,7 +104,10 @@ public sealed class GraphApiClient(
             document["webUrl"]?.GetValue<string>() ?? string.Empty);
     }
 
-    public async Task<IReadOnlyList<SharePointColumnDefinition>> GetColumnsAsync(string siteId, string listId, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<SharePointColumnDefinition>> GetColumnsAsync(
+        string siteId,
+        string listId,
+        CancellationToken cancellationToken)
     {
         var requestUri = $"sites/{siteId}/lists/{listId}/columns?$select=name,displayName,hidden,readOnly,required,text,choice,number,currency,dateTime,lookup,personOrGroup,boolean,hyperlinkOrPicture,term,calculated";
         var collection = await GetCollectionAsync(requestUri, cancellationToken);
@@ -110,7 +123,10 @@ public sealed class GraphApiClient(
             .Where(column => !string.IsNullOrWhiteSpace(column.InternalName))];
     }
 
-    public async Task<DriveItemInfo> GetDriveItemByPathAsync(string driveId, string? relativePath, CancellationToken cancellationToken)
+    public async Task<DriveItemInfo> GetDriveItemByPathAsync(
+        string driveId,
+        string? relativePath,
+        CancellationToken cancellationToken)
     {
         var normalizedPath = PathUtilities.NormalizeRelativePath(relativePath);
         var requestUri = string.IsNullOrEmpty(normalizedPath)
@@ -122,7 +138,10 @@ public sealed class GraphApiClient(
         return ToDriveItem(document, normalizedPath);
     }
 
-    public async Task<DriveItemInfo?> TryGetDriveItemByPathAsync(string driveId, string? relativePath, CancellationToken cancellationToken)
+    public async Task<DriveItemInfo?> TryGetDriveItemByPathAsync(
+        string driveId,
+        string? relativePath,
+        CancellationToken cancellationToken)
     {
         var normalizedPath = PathUtilities.NormalizeRelativePath(relativePath);
         var requestUri = string.IsNullOrEmpty(normalizedPath)
@@ -133,7 +152,11 @@ public sealed class GraphApiClient(
         return document is null ? null : ToDriveItem(document, normalizedPath);
     }
 
-    public async Task<IReadOnlyList<DriveItemInfo>> ListChildrenAsync(string driveId, string itemId, string parentRelativePath, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<DriveItemInfo>> ListChildrenAsync(
+        string driveId,
+        string itemId,
+        string parentRelativePath,
+        CancellationToken cancellationToken)
     {
         var requestUri = $"drives/{driveId}/items/{itemId}/children?$select=id,name,webUrl,size,folder";
         var collection = await GetCollectionAsync(requestUri, cancellationToken);
@@ -148,7 +171,11 @@ public sealed class GraphApiClient(
             .ToArray();
     }
 
-    public async Task DownloadFileAsync(string driveId, string itemId, string destinationFilePath, CancellationToken cancellationToken)
+    public async Task DownloadFileAsync(
+        string driveId,
+        string itemId,
+        string destinationFilePath,
+        CancellationToken cancellationToken)
     {
         using var response = await SendGraphAsync(
             HttpMethod.Get,
@@ -161,20 +188,31 @@ public sealed class GraphApiClient(
         await sourceStream.CopyToAsync(destinationStream, cancellationToken);
     }
 
-    public async Task<JsonObject> GetListItemFieldsAsync(string driveId, string itemId, CancellationToken cancellationToken)
+    public async Task<JsonObject> GetListItemFieldsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken cancellationToken)
     {
         return await GetJsonAsync($"drives/{driveId}/items/{itemId}/listItem/fields", cancellationToken)
             ?? [];
     }
 
-    public async Task<string> GetListItemIdForDriveItemAsync(string driveId, string itemId, CancellationToken cancellationToken)
+    public async Task<string> GetListItemIdForDriveItemAsync(
+        string driveId,
+        string itemId,
+        CancellationToken cancellationToken)
     {
         var document = await GetJsonAsync($"drives/{driveId}/items/{itemId}/listItem?$select=id", cancellationToken)
             ?? throw new InvalidOperationException("Graph response missing list item payload.");
         return document["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list item id.");
     }
 
-    public async Task UpdateListItemFieldsAsync(string siteId, string listId, string listItemId, JsonObject fields, CancellationToken cancellationToken)
+    public async Task UpdateListItemFieldsAsync(
+        string siteId,
+        string listId,
+        string listItemId,
+        JsonObject fields,
+        CancellationToken cancellationToken)
     {
         var payload = fields.ToJsonString(SerializerOptions);
         await SendGraphAsync(
@@ -184,7 +222,10 @@ public sealed class GraphApiClient(
             cancellationToken);
     }
 
-    public async Task EnsureFolderExistsAsync(string driveId, string? relativePath, CancellationToken cancellationToken)
+    public async Task EnsureFolderExistsAsync(
+        string driveId,
+        string? relativePath,
+        CancellationToken cancellationToken)
     {
         var normalizedPath = PathUtilities.NormalizeRelativePath(relativePath);
         if (string.IsNullOrEmpty(normalizedPath))
@@ -268,7 +309,11 @@ public sealed class GraphApiClient(
         return await UploadWithSessionAsync(driveId, normalizedPath, sourceFilePath, overwrite, cancellationToken);
     }
 
-    private async Task<UploadResult> UploadSmallFileAsync(string driveId, string destinationRelativePath, string sourceFilePath, CancellationToken cancellationToken)
+    private async Task<UploadResult> UploadSmallFileAsync(
+        string driveId,
+        string destinationRelativePath,
+        string sourceFilePath,
+        CancellationToken cancellationToken)
     {
         var requestUri = $"drives/{driveId}/root:/{PathUtilities.EncodeGraphPath(destinationRelativePath)}:/content";
         var bytes = await File.ReadAllBytesAsync(sourceFilePath, cancellationToken);
@@ -365,7 +410,10 @@ public sealed class GraphApiClient(
         throw new InvalidOperationException($"Upload session for '{destinationRelativePath}' ended without a final drive item.");
     }
 
-    private async Task<JsonObject?> GetJsonAsync(string requestUri, CancellationToken cancellationToken, bool allowNotFound = false)
+    private async Task<JsonObject?> GetJsonAsync(
+        string requestUri,
+        CancellationToken cancellationToken,
+        bool allowNotFound = false)
     {
         using var response = await SendGraphAsync(HttpMethod.Get, requestUri, contentFactory: null, cancellationToken, allowNotFound);
         if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
@@ -376,7 +424,10 @@ public sealed class GraphApiClient(
         return await DeserializeObjectAsync(response, cancellationToken);
     }
 
-    private async Task<JsonObject> PostJsonAsync(string requestUri, JsonObject payload, CancellationToken cancellationToken)
+    private async Task<JsonObject> PostJsonAsync(
+        string requestUri,
+        JsonObject payload,
+        CancellationToken cancellationToken)
     {
         using var response = await SendGraphAsync(
             HttpMethod.Post,
@@ -387,7 +438,9 @@ public sealed class GraphApiClient(
         return await DeserializeObjectAsync(response, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<JsonObject>> GetCollectionAsync(string requestUri, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<JsonObject>> GetCollectionAsync(
+        string requestUri,
+        CancellationToken cancellationToken)
     {
         var items = new List<JsonObject>();
         var nextUri = requestUri;
@@ -485,7 +538,9 @@ public sealed class GraphApiClient(
         }
     }
 
-    private static async Task<JsonObject> DeserializeObjectAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<JsonObject> DeserializeObjectAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         var node = JsonNode.Parse(content) as JsonObject;
