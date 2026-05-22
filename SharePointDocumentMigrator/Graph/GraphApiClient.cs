@@ -422,7 +422,9 @@ public sealed class GraphApiClient(
             cancellationToken,
             allowNotFound);
 
-        return await DeserializeObjectAsync(response, cancellationToken);
+        return allowNotFound && response.StatusCode == HttpStatusCode.NotFound
+            ? null
+            : await DeserializeObjectAsync(response, cancellationToken);
     }
 
     private async Task<JsonObject> PostJsonAsync(
