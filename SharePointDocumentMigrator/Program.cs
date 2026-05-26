@@ -69,8 +69,6 @@ try
         client.Timeout = TimeSpan.FromMinutes(15);
     });
 
-    builder.Services.AddSingleton<MetadataSchemaComparer>();
-    builder.Services.AddSingleton<MetadataFieldSelector>();
     builder.Services.AddSingleton<MigrationOrchestrator>();
 
     using var host = builder.Build();

@@ -1,33 +1,30 @@
 namespace SharePointDocumentMigrator.Migration;
 
-public sealed class TemporaryFile : IDisposable
+public static class TemporaryFile
 {
-    private TemporaryFile(string path)
+    public static string Create(string? extension = null)
     {
-        Path = path;
-    }
-
-    public string Path { get; }
-
-    public static TemporaryFile Create(string? extension = null)
-    {
-        extension = string.IsNullOrWhiteSpace(extension)
-            ? ".tmp"
-            : extension.StartsWith('.') ? extension : $".{extension}";
-
-        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{Guid.NewGuid():N}{extension}");
-        using (File.Create(path))
+        if (string.IsNullOrWhiteSpace(extension))
         {
+            extension = ".tmp";
+        }
+        else if (!extension.StartsWith('.'))
+        {
+            extension = $".{extension}";
         }
 
-        return new TemporaryFile(path);
+        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}{extension}");
+
+        File.WriteAllBytes(path, []);
+
+        return path;
     }
 
-    public void Dispose()
+    public static void Delete(string path)
     {
-        if (File.Exists(Path))
+        if (File.Exists(path))
         {
-            File.Delete(Path);
+            File.Delete(path);
         }
     }
 }

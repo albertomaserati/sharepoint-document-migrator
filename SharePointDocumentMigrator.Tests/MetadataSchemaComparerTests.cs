@@ -8,7 +8,6 @@ public sealed class MetadataSchemaComparerTests
     [Fact]
     public async Task Compare_ReturnsWritableColumns_WhenSchemasMatch()
     {
-        var comparer = new MetadataSchemaComparer();
         var sourceColumns = new[]
         {
             new SharePointColumnDefinition("Title", "Title", "text", Hidden: false, ReadOnly: false, Required: false),
@@ -30,7 +29,6 @@ public sealed class MetadataSchemaComparerTests
     [Fact]
     public async Task Compare_ReturnsErrors_WhenTargetColumnIsMissing()
     {
-        var comparer = new MetadataSchemaComparer();
         var sourceColumns = new[]
         {
             new SharePointColumnDefinition("Title", "Title", "text", Hidden: false, ReadOnly: false, Required: false),
@@ -51,7 +49,6 @@ public sealed class MetadataSchemaComparerTests
     [Fact]
     public async Task Compare_ResolvesTargetColumnViaMapping_WhenNamesAreDifferent()
     {
-        var comparer = new MetadataSchemaComparer();
         var sourceColumns = new[]
         {
             new SharePointColumnDefinition("CategoriaProgetto", "Categoria Progetto", "choice", Hidden: false, ReadOnly: false, Required: false)
@@ -74,7 +71,6 @@ public sealed class MetadataSchemaComparerTests
     [Fact]
     public async Task Compare_ReturnsError_WhenMappedTargetColumnIsMissing()
     {
-        var comparer = new MetadataSchemaComparer();
         var sourceColumns = new[]
         {
             new SharePointColumnDefinition("CategoriaProgetto", "Categoria Progetto", "choice", Hidden: false, ReadOnly: false, Required: false)

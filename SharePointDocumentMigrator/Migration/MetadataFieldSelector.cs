@@ -1,9 +1,9 @@
-using System.Text.Json.Nodes;
 using SharePointDocumentMigrator.Graph;
+using System.Text.Json.Nodes;
 
 namespace SharePointDocumentMigrator.Migration;
 
-public sealed class MetadataFieldSelector
+public static class MetadataFieldSelector
 {
     private static readonly HashSet<string> ExplicitlyIgnoredFields = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -32,7 +32,7 @@ public sealed class MetadataFieldSelector
         "_UIVersionString"
     };
 
-    public MetadataSelectionResult SelectUpdatableFields(
+    public static MetadataSelectionResult SelectUpdatableFields(
         JsonObject fields,
         IReadOnlyDictionary<string, SharePointColumnDefinition> writableColumns,
         IReadOnlyDictionary<string, string>? fieldMappings = null)
@@ -40,32 +40,19 @@ public sealed class MetadataFieldSelector
         var selectedFields = new JsonObject();
         var skippedFields = new List<string>();
 
-        foreach (var property in fields)
+        foreach (KeyValuePair<string, JsonNode?> property in fields)
         {
-            if (property.Value is null)
+            if (property.Value is null || property.Key.StartsWith('@'))
             {
                 continue;
             }
 
-            if (property.Key.StartsWith('@'))
-            {
-                continue;
-            }
-
-            if (ExplicitlyIgnoredFields.Contains(property.Key))
+            if (ExplicitlyIgnoredFields.Contains(property.Key) || !writableColumns.ContainsKey(property.Key))
             {
                 skippedFields.Add(property.Key);
                 continue;
             }
 
-            if (!writableColumns.ContainsKey(property.Key))
-            {
-                skippedFields.Add(property.Key);
-                continue;
-            }
-
-            // If a mapping exists for this field, write it to the target using the mapped name;
-            // otherwise keep the original source name.
             var targetKey = fieldMappings is not null && fieldMappings.TryGetValue(property.Key, out var mapped)
                 ? mapped
                 : property.Key;

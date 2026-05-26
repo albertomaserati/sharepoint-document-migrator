@@ -1,6 +1,6 @@
-using System.Text.Json.Nodes;
 using SharePointDocumentMigrator.Graph;
 using SharePointDocumentMigrator.Migration;
+using System.Text.Json.Nodes;
 
 namespace SharePointDocumentMigrator.Tests;
 
@@ -9,7 +9,6 @@ public sealed class MetadataFieldSelectorTests
     [Fact]
     public void SelectUpdatableFields_FiltersOutSystemAndUnknownFields()
     {
-        var selector = new MetadataFieldSelector();
         var fields = new JsonObject
         {
             ["Title"] = "Document A",
@@ -24,7 +23,7 @@ public sealed class MetadataFieldSelectorTests
             ["Category"] = new("Category", "Category", "choice", Hidden: false, ReadOnly: false, Required: false)
         };
 
-        var result = selector.SelectUpdatableFields(fields, writableColumns);
+        var result = MetadataFieldSelector.SelectUpdatableFields(fields, writableColumns);
 
         Assert.Equal(2, result.Fields.Count);
         Assert.Equal("Document A", result.Fields["Title"]?.GetValue<string>());
@@ -36,7 +35,6 @@ public sealed class MetadataFieldSelectorTests
     [Fact]
     public void SelectUpdatableFields_RenamesFieldKey_WhenMappingIsProvided()
     {
-        var selector = new MetadataFieldSelector();
         var fields = new JsonObject
         {
             ["CategoriaProgetto"] = "Infrastruttura",
@@ -51,7 +49,7 @@ public sealed class MetadataFieldSelectorTests
 
         var mappings = new Dictionary<string, string> { ["CategoriaProgetto"] = "Category" };
 
-        var result = selector.SelectUpdatableFields(fields, writableColumns, mappings);
+        var result = MetadataFieldSelector.SelectUpdatableFields(fields, writableColumns, mappings);
 
         // The field must appear under the target name "Category", not under the source name
         Assert.True(result.Fields.ContainsKey("Category"));
@@ -65,7 +63,6 @@ public sealed class MetadataFieldSelectorTests
     [Fact]
     public void SelectUpdatableFields_KeepsOriginalKey_WhenNoMappingForField()
     {
-        var selector = new MetadataFieldSelector();
         var fields = new JsonObject { ["Title"] = "Doc" };
 
         var writableColumns = new Dictionary<string, SharePointColumnDefinition>(StringComparer.OrdinalIgnoreCase)
@@ -76,7 +73,7 @@ public sealed class MetadataFieldSelectorTests
         // Mapping is present but does not cover "Title"
         var mappings = new Dictionary<string, string> { ["OtherField"] = "OtherTarget" };
 
-        var result = selector.SelectUpdatableFields(fields, writableColumns, mappings);
+        var result = MetadataFieldSelector.SelectUpdatableFields(fields, writableColumns, mappings);
 
         Assert.True(result.Fields.ContainsKey("Title"));
         Assert.Equal("Doc", result.Fields["Title"]?.GetValue<string>());

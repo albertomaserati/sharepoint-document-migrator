@@ -2,7 +2,7 @@ using SharePointDocumentMigrator.Graph;
 
 namespace SharePointDocumentMigrator.Migration;
 
-public sealed class MetadataSchemaComparer
+public static class MetadataSchemaComparer
 {
     private static readonly HashSet<string> IgnoredColumns = new(StringComparer.OrdinalIgnoreCase)
     {

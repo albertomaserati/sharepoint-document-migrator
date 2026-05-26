@@ -617,6 +617,7 @@ public sealed class GraphApiClient(
         bool allowNotFound = false)
     {
         var attempt = 0;
+
         while (true)
         {
             using var request = new HttpRequestMessage(method, requestUri)
@@ -635,19 +636,13 @@ public sealed class GraphApiClient(
 
             var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
-            if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
-            {
+            if (response.IsSuccessStatusCode || (allowNotFound && response.StatusCode == HttpStatusCode.NotFound))
                 return response;
-            }
-
-            if (response.IsSuccessStatusCode)
-            {
-                return response;
-            }
 
             if (attempt < _migrationOptions.MaxRetryCount && RetriableStatusCodes.Contains(response.StatusCode))
             {
                 var delay = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
+
                 _logger.LogWarning(
                     "Graph request {Method} {RequestUri} failed with {StatusCode}. Retrying in {Delay}.",
                     method,
@@ -656,6 +651,7 @@ public sealed class GraphApiClient(
                     delay);
 
                 response.Dispose();
+
                 await Task.Delay(delay, cancellationToken);
 
                 attempt++;
@@ -665,6 +661,7 @@ public sealed class GraphApiClient(
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             var message = $"Graph request {method} {requestUri} failed with status {(int)response.StatusCode}.";
+
             response.Dispose();
 
             throw new GraphApiException(message, (int)response.StatusCode, requestUri, body);

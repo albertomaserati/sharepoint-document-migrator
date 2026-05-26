@@ -7,12 +7,10 @@ namespace SharePointDocumentMigrator.Migration;
 
 public sealed class MigrationOrchestrator(
     GraphApiClient graphApiClient,
-    MetadataFieldSelector fieldSelector,
     IOptions<MigrationOptions> migrationOptions,
     ILogger<MigrationOrchestrator> logger)
 {
     private readonly GraphApiClient _graphApiClient = graphApiClient;
-    private readonly MetadataFieldSelector _fieldSelector = fieldSelector;
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
 
@@ -21,11 +19,7 @@ public sealed class MigrationOrchestrator(
     public async Task<MigrationReport> ExecuteAsync(CancellationToken cancellationToken)
     {
         _report = new MigrationReport(_migrationOptions.DryRun);
-        return await ExecuteGraphModeAsync(cancellationToken);
-    }
 
-    private async Task<MigrationReport> ExecuteGraphModeAsync(CancellationToken cancellationToken)
-    {
         _logger.LogInformation("Resolving source and target SharePoint locations.");
         ResolvedLibraryContext sourceContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Source, cancellationToken);
         ResolvedLibraryContext targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
@@ -70,15 +64,22 @@ public sealed class MigrationOrchestrator(
                     PathUtilities.GetParentPath(targetFilePath),
                     cancellationToken);
 
-                using var temporaryFile = TemporaryFile.Create(Path.GetExtension(file.Name));
-                await _graphApiClient.DownloadFileAsync(sourceContext.Drive.Id, file.Id, temporaryFile.Path, cancellationToken);
+                var tempPath = TemporaryFile.Create(Path.GetExtension(file.Name));
 
-                var uploadResult = await _graphApiClient.UploadFileAsync(
+                await _graphApiClient.DownloadFileAsync(
+                    sourceContext.Drive.Id,
+                    file.Id,
+                    tempPath,
+                    cancellationToken);
+
+                UploadResult uploadResult = await _graphApiClient.UploadFileAsync(
                     targetContext.Drive.Id,
                     targetFilePath,
-                    temporaryFile.Path,
+                    tempPath,
                     _migrationOptions.OverwriteExistingFiles,
                     cancellationToken);
+
+                TemporaryFile.Delete(tempPath);
 
                 if (uploadResult.WasSkipped)
                 {
@@ -88,7 +89,13 @@ public sealed class MigrationOrchestrator(
 
                 if (_migrationOptions.EnableMetadataMigration)
                 {
-                    await ProcessMetadataAsync(sourceContext, targetContext, file, schemaValidation!, uploadResult, cancellationToken);
+                    await ProcessMetadataAsync(
+                        sourceContext,
+                        targetContext,
+                        file,
+                        schemaValidation!,
+                        uploadResult,
+                        cancellationToken);
                 }
 
                 _report.RecordMigratedFile(targetFilePath);
@@ -134,10 +141,17 @@ public sealed class MigrationOrchestrator(
             throw new InvalidOperationException("The configured SharePoint source root must be a folder.");
         }
 
-        var folders = new List<DriveItemInfo>();
-        var files = new List<DriveItemInfo>();
-        var pending = new Queue<DriveItemInfo>();
-        pending.Enqueue(new DriveItemInfo(root.Id, root.Name, string.Empty, true, root.WebUrl, root.Size));
+        List<DriveItemInfo> folders = [];
+        List<DriveItemInfo> files = [];
+        Queue<DriveItemInfo> pending = new();
+
+        pending.Enqueue(new DriveItemInfo(
+            root.Id,
+            root.Name,
+            string.Empty,
+            true,
+            root.WebUrl,
+            root.Size));
 
         while (pending.Count > 0)
         {
@@ -170,7 +184,7 @@ public sealed class MigrationOrchestrator(
         CancellationToken cancellationToken)
     {
         var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
-        var selectedMetadata = _fieldSelector.SelectUpdatableFields(
+        var selectedMetadata = MetadataFieldSelector.SelectUpdatableFields(
             sourceFields,
             schemaValidation.WritableColumns,
             _migrationOptions.MetadataFieldMappings);
