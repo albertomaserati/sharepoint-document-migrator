@@ -21,7 +21,7 @@ public sealed class MetadataSchemaComparerTests
             new SharePointColumnDefinition("Category", "Category", "choice", Hidden: false, ReadOnly: false, Required: false)
         };
 
-        var result = await MetadataSchemaComparer.Compare(sourceColumns, targetColumns);
+        var result = await MetadataSchemaComparer.CompareAsync(sourceColumns, targetColumns);
 
         Assert.True(result.IsValid);
         Assert.Equal(2, result.WritableColumns.Count);
@@ -42,7 +42,7 @@ public sealed class MetadataSchemaComparerTests
             new SharePointColumnDefinition("Title", "Title", "text", Hidden: false, ReadOnly: false, Required: false)
         };
 
-        var result = await MetadataSchemaComparer.Compare(sourceColumns, targetColumns);
+        var result = await MetadataSchemaComparer.CompareAsync(sourceColumns, targetColumns);
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error => error.Contains("Category", StringComparison.Ordinal));
@@ -64,7 +64,7 @@ public sealed class MetadataSchemaComparerTests
 
         var mappings = new Dictionary<string, string> { ["CategoriaProgetto"] = "Category" };
 
-        var result = await MetadataSchemaComparer.Compare(sourceColumns, targetColumns, mappings);
+        var result = await MetadataSchemaComparer.CompareAsync(sourceColumns, targetColumns, mappings);
 
         Assert.True(result.IsValid);
         // WritableColumns is keyed by source name
@@ -87,7 +87,7 @@ public sealed class MetadataSchemaComparerTests
 
         var mappings = new Dictionary<string, string> { ["CategoriaProgetto"] = "NonExistentColumn" };
 
-        var result = await MetadataSchemaComparer.Compare(sourceColumns, targetColumns, mappings);
+        var result = await MetadataSchemaComparer.CompareAsync(sourceColumns, targetColumns, mappings);
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error => error.Contains("NonExistentColumn", StringComparison.Ordinal));

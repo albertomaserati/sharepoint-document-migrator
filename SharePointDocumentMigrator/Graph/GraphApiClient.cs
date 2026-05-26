@@ -288,14 +288,13 @@ public sealed class GraphApiClient(
         var requestUri = $"drives/{driveId}/items/{itemId}/children?$select=id,name,webUrl,size,folder";
         var collection = await GetCollectionAsync(requestUri, cancellationToken);
 
-        return collection
+        return [.. collection
             .Select(node =>
             {
                 var name = node["name"]?.GetValue<string>() ?? string.Empty;
                 var relativePath = PathUtilities.CombineRelativePath(parentRelativePath, name);
                 return ToDriveItem(node, relativePath);
-            })
-            .ToArray();
+            })];
     }
 
     public async Task DownloadFileAsync(
@@ -513,8 +512,8 @@ public sealed class GraphApiClient(
                     content.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + bytesRead - 1, totalLength);
                     return content;
                 },
-                cancellationToken,
-                includeAuthorization: false);
+                includeAuthorization: false,
+                cancellationToken);
             if (response.StatusCode == HttpStatusCode.Created || response.StatusCode == HttpStatusCode.OK)
             {
                 var document = await DeserializeObjectAsync(response, cancellationToken);
@@ -604,8 +603,8 @@ public sealed class GraphApiClient(
             method,
             requestUri,
             contentFactory,
-            cancellationToken,
             includeAuthorization: true,
+            cancellationToken,
             allowNotFound: allowNotFound);
     }
 
@@ -613,8 +612,8 @@ public sealed class GraphApiClient(
         HttpMethod method,
         string requestUri,
         Func<HttpContent?>? contentFactory,
-        CancellationToken cancellationToken,
         bool includeAuthorization,
+        CancellationToken cancellationToken,
         bool allowNotFound = false)
     {
         for (var attempt = 0; ; attempt++)
@@ -674,7 +673,7 @@ public sealed class GraphApiClient(
     {
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
         var node = JsonNode.Parse(content) as JsonObject;
-        return node ?? new JsonObject();
+        return node ?? [];
     }
 
     private static string DetermineColumnType(JsonObject column)
