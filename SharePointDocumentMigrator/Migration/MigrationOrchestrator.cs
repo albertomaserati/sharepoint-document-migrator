@@ -7,11 +7,13 @@ namespace SharePointDocumentMigrator.Migration;
 
 public sealed class MigrationOrchestrator(
     GraphApiClient graphApiClient,
+    SharePointRestApiClient restApiClient,
     MetadataFieldSelector fieldSelector,
     IOptions<MigrationOptions> migrationOptions,
     ILogger<MigrationOrchestrator> logger)
 {
     private readonly GraphApiClient _graphApiClient = graphApiClient;
+    private readonly SharePointRestApiClient _restApiClient = restApiClient;
     private readonly MetadataFieldSelector _fieldSelector = fieldSelector;
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
@@ -22,43 +24,46 @@ public sealed class MigrationOrchestrator(
     {
         _report = new MigrationReport(_migrationOptions.DryRun);
 
+        _logger.LogInformation("Migration mode: {Mode}.", _migrationOptions.MigrationMode);
+
+        return _migrationOptions.MigrationMode switch
+        {
+            MigrationMode.Graph => await ExecuteGraphModeAsync(cancellationToken),
+            MigrationMode.Http => await ExecuteHttpModeAsync(cancellationToken),
+            _ => throw new InvalidOperationException($"Unknown migration mode: {_migrationOptions.MigrationMode}.")
+        };
+    }
+
+    private async Task<MigrationReport> ExecuteGraphModeAsync(CancellationToken cancellationToken)
+    {
         _logger.LogInformation("Resolving source and target SharePoint locations.");
         ResolvedLibraryContext sourceContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Source, cancellationToken);
         ResolvedLibraryContext targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
+        SchemaValidationResult? schemaValidation = await ValidateSchemaAsync(sourceContext, targetContext);
 
-        SchemaValidationResult? schemaValidation = await MetadataSchemaComparer.Compare(
-            sourceContext.Columns,
-            targetContext.Columns,
-            _migrationOptions.MetadataFieldMappings);
+        string sourceRoot = PathUtilities.NormalizeRelativePath(_migrationOptions.Source.RootFolder);
+        string targetRoot = PathUtilities.NormalizeRelativePath(_migrationOptions.Target.RootFolder);
+        LibraryInventory inventory = await EnumerateGraphAsync(sourceContext.Drive.Id, sourceRoot, cancellationToken);
 
-        if (!_migrationOptions.DryRun && _migrationOptions.EnableMetadataMigration && !schemaValidation.IsValid)
+        foreach (string? folderRelativePath in inventory.Folders.Select(f => f.RelativePath))
         {
-            throw new InvalidOperationException(
-                "Source and target libraries are not schema-compatible:" + Environment.NewLine
-                + string.Join(Environment.NewLine, schemaValidation.Errors.Select(error => $" - {error}")));
-        }
+            string targetFolderPath = PathUtilities.CombineRelativePath(targetRoot, folderRelativePath);
 
-        var sourceRoot = PathUtilities.NormalizeRelativePath(_migrationOptions.Source.RootFolder);
-        var targetRoot = PathUtilities.NormalizeRelativePath(_migrationOptions.Target.RootFolder);
-        var inventory = await EnumerateAsync(sourceContext.Drive.Id, sourceRoot, cancellationToken);
-
-        foreach (var folder in inventory.Folders)
-        {
-            var targetFolderPath = PathUtilities.CombineRelativePath(targetRoot, folder.RelativePath);
             if (_migrationOptions.DryRun)
             {
-                _logger.LogInformation("[DRY RUN] Folder found — source: {SourcePath} | target: {TargetPath}", folder.RelativePath, targetFolderPath);
+                _logger.LogInformation("[DRY RUN] Folder found — source: {SourcePath} | target: {TargetPath}", folderRelativePath, targetFolderPath);
                 _report.RecordDryRunFolder(targetFolderPath);
                 continue;
             }
 
             await _graphApiClient.EnsureFolderExistsAsync(targetContext.Drive.Id, targetFolderPath, cancellationToken);
+
             _report.RecordFolderEnsured();
         }
 
         foreach (DriveItemInfo file in inventory.Files)
         {
-            var targetFilePath = PathUtilities.CombineRelativePath(targetRoot, file.RelativePath);
+            string targetFilePath = PathUtilities.CombineRelativePath(targetRoot, file.RelativePath);
 
             try
             {
@@ -66,6 +71,7 @@ public sealed class MigrationOrchestrator(
                 {
                     _logger.LogInformation("Source file name: {SourceFile}. Url: {WebUrl}", file.RelativePath, file.WebUrl);
                     _report.RecordDryRunFile(targetFilePath);
+
                     continue;
                 }
 
@@ -75,13 +81,9 @@ public sealed class MigrationOrchestrator(
                     cancellationToken);
 
                 using var temporaryFile = TemporaryFile.Create(Path.GetExtension(file.Name));
-                await _graphApiClient.DownloadFileAsync(
-                    sourceContext.Drive.Id,
-                    file.Id,
-                    temporaryFile.Path,
-                    cancellationToken);
+                await _graphApiClient.DownloadFileAsync(sourceContext.Drive.Id, file.Id, temporaryFile.Path, cancellationToken);
 
-                UploadResult? uploadResult = await _graphApiClient.UploadFileAsync(
+                var uploadResult = await _graphApiClient.UploadFileAsync(
                     targetContext.Drive.Id,
                     targetFilePath,
                     temporaryFile.Path,
@@ -96,13 +98,7 @@ public sealed class MigrationOrchestrator(
 
                 if (_migrationOptions.EnableMetadataMigration)
                 {
-                    await ProcessMetadataAsync(
-                        sourceContext,
-                        targetContext,
-                        file,
-                        schemaValidation,
-                        uploadResult,
-                        cancellationToken);
+                    await ProcessMetadataAsync(sourceContext, targetContext, file, schemaValidation!, uploadResult, cancellationToken);
                 }
 
                 _report.RecordMigratedFile(targetFilePath);
@@ -115,8 +111,64 @@ public sealed class MigrationOrchestrator(
         }
 
         _logger.LogInformation(_report.PrintReport());
-
         return _report;
+    }
+
+    private async Task<SchemaValidationResult?> ValidateSchemaAsync(ResolvedLibraryContext sourceContext, ResolvedLibraryContext targetContext)
+    {
+        SchemaValidationResult res = null;
+
+        if (_migrationOptions.EnableMetadataMigration)
+        {
+            res = await MetadataSchemaComparer.CompareAsync(
+                sourceContext.Columns,
+                targetContext.Columns,
+                _migrationOptions.MetadataFieldMappings);
+
+            if (!_migrationOptions.DryRun && !res.IsValid)
+            {
+                throw new InvalidOperationException(
+                    "Source and target libraries are not schema-compatible:" + Environment.NewLine
+                    + string.Join(Environment.NewLine, res.Errors.Select(e => $" - {e}")));
+            }
+        }
+
+        return res;
+    }
+
+    private async Task<LibraryInventory> EnumerateGraphAsync(string driveId, string sourceRoot, CancellationToken cancellationToken)
+    {
+        var root = await _graphApiClient.GetDriveItemByPathAsync(driveId, sourceRoot, cancellationToken);
+        if (!root.IsFolder)
+        {
+            throw new InvalidOperationException("The configured SharePoint source root must be a folder.");
+        }
+
+        var folders = new List<DriveItemInfo>();
+        var files = new List<DriveItemInfo>();
+        var pending = new Queue<DriveItemInfo>();
+        pending.Enqueue(new DriveItemInfo(root.Id, root.Name, string.Empty, true, root.WebUrl, root.Size));
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Dequeue();
+            var children = await _graphApiClient.ListChildrenAsync(driveId, current.Id, current.RelativePath, cancellationToken);
+
+            foreach (var child in children)
+            {
+                if (child.IsFolder)
+                {
+                    folders.Add(child);
+                    pending.Enqueue(child);
+                }
+                else
+                {
+                    files.Add(child);
+                }
+            }
+        }
+
+        return new LibraryInventory(folders, files);
     }
 
     private async Task ProcessMetadataAsync(
@@ -125,13 +177,12 @@ public sealed class MigrationOrchestrator(
         DriveItemInfo file,
         SchemaValidationResult schemaValidation,
         UploadResult uploadResult,
-
         CancellationToken cancellationToken)
     {
         var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
         var selectedMetadata = _fieldSelector.SelectUpdatableFields(
             sourceFields,
-            schemaValidation!.WritableColumns,
+            schemaValidation.WritableColumns,
             _migrationOptions.MetadataFieldMappings);
 
         if (selectedMetadata.Fields.Count > 0)
@@ -152,39 +203,111 @@ public sealed class MigrationOrchestrator(
         }
     }
 
-    private async Task<LibraryInventory> EnumerateAsync(string driveId, string sourceRoot, CancellationToken cancellationToken)
+    // -------------------------------------------------------------------------
+    // Http mode — source via SharePoint REST API, target via Microsoft Graph API
+    // -------------------------------------------------------------------------
+
+    private async Task<MigrationReport> ExecuteHttpModeAsync(CancellationToken cancellationToken)
     {
-        var root = await _graphApiClient.GetDriveItemByPathAsync(driveId, sourceRoot, cancellationToken);
-        if (!root.IsFolder)
+        if (_migrationOptions.EnableMetadataMigration)
         {
-            throw new InvalidOperationException("The configured SharePoint source root must be a folder.");
+            _logger.LogWarning(
+                "Metadata migration is not supported in Http mode and will be skipped. " +
+                "Switch to Graph mode if metadata migration is required.");
         }
 
-        var folders = new List<DriveItemInfo>();
-        var files = new List<DriveItemInfo>();
-        var pendingFolders = new Queue<DriveItemInfo>();
-        pendingFolders.Enqueue(new DriveItemInfo(root.Id, root.Name, string.Empty, true, root.WebUrl, root.Size));
+        // Resolve target via Graph API — standard library, no access issues.
+        _logger.LogInformation("Resolving target SharePoint location via Graph API.");
+        var targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
 
-        while (pendingFolders.Count > 0)
+        // Resolve source via SharePoint REST API — works for hidden/Publishing libraries.
+        var sourceHostname = _migrationOptions.Source.Hostname;
+        var sourceSiteUrl = $"https://{sourceHostname}{_migrationOptions.Source.SitePath}";
+
+        _logger.LogInformation(
+            "Resolving source library '{LibraryName}' via SharePoint REST API at '{SiteUrl}'.",
+            _migrationOptions.Source.LibraryName, sourceSiteUrl);
+
+        var sourceList = await _restApiClient.TryResolveListAsync(
+            sourceHostname, sourceSiteUrl, _migrationOptions.Source.LibraryName, cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"Source library '{_migrationOptions.Source.LibraryName}' was not found via SharePoint REST API at '{sourceSiteUrl}'. " +
+                "Verify that LibraryName matches the library display title and that the app has site access.");
+
+        // sourceList.WebUrl contains the server-relative URL of the library root
+        // (e.g. /teams/intranet/it/documenti), used as the enumeration start point.
+        var (sourceFolders, sourceFiles) = await _restApiClient.EnumerateLibraryAsync(
+            sourceHostname,
+            sourceSiteUrl,
+            sourceList.WebUrl,
+            PathUtilities.NormalizeRelativePath(_migrationOptions.Source.RootFolder),
+            cancellationToken);
+
+        var targetRoot = PathUtilities.NormalizeRelativePath(_migrationOptions.Target.RootFolder);
+
+        foreach (var folder in sourceFolders)
         {
-            var currentFolder = pendingFolders.Dequeue();
-            var children = await _graphApiClient.ListChildrenAsync(driveId, currentFolder.Id, currentFolder.RelativePath, cancellationToken);
-
-            foreach (var child in children)
+            var targetFolderPath = PathUtilities.CombineRelativePath(targetRoot, folder.RelativePath);
+            if (_migrationOptions.DryRun)
             {
-                if (child.IsFolder)
+                _logger.LogInformation("[DRY RUN] Folder found — source: {SourcePath} | target: {TargetPath}", folder.RelativePath, targetFolderPath);
+                _report.RecordDryRunFolder(targetFolderPath);
+
+                continue;
+            }
+
+            await _graphApiClient.EnsureFolderExistsAsync(targetContext.Drive.Id, targetFolderPath, cancellationToken);
+            _report.RecordFolderEnsured();
+        }
+
+        foreach (var file in sourceFiles)
+        {
+            var targetFilePath = PathUtilities.CombineRelativePath(targetRoot, file.RelativePath);
+
+            try
+            {
+                if (_migrationOptions.DryRun)
                 {
-                    folders.Add(child);
-                    pendingFolders.Enqueue(child);
+                    _logger.LogInformation("Source file name: {SourceFile}. Url: {WebUrl}", file.RelativePath, file.WebUrl);
+                    _report.RecordDryRunFile(targetFilePath);
+
+                    continue;
                 }
-                else
+
+                await _graphApiClient.EnsureFolderExistsAsync(
+                    targetContext.Drive.Id,
+                    PathUtilities.GetParentPath(targetFilePath),
+                    cancellationToken);
+
+                // Download from source using the absolute file URL via SharePoint REST API bearer token.
+                using var temporaryFile = TemporaryFile.Create(Path.GetExtension(file.Name));
+                await _restApiClient.DownloadFileAsync(sourceHostname, file.WebUrl, temporaryFile.Path, cancellationToken);
+
+                // Upload to target via Graph API.
+                var uploadResult = await _graphApiClient.UploadFileAsync(
+                    targetContext.Drive.Id,
+                    targetFilePath,
+                    temporaryFile.Path,
+                    _migrationOptions.OverwriteExistingFiles,
+                    cancellationToken);
+
+                if (uploadResult.WasSkipped)
                 {
-                    files.Add(child);
+                    _report.RecordSkippedFile(targetFilePath);
+                    continue;
                 }
+
+                _report.RecordMigratedFile(targetFilePath);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Failed to migrate '{RelativePath}'.", file.RelativePath);
+                _report.RecordFailure(file.RelativePath, exception.Message);
             }
         }
 
-        return new LibraryInventory(folders, files);
+        _logger.LogInformation(_report.PrintReport());
+        return _report;
     }
 
     private sealed record LibraryInventory(IReadOnlyList<DriveItemInfo> Folders, IReadOnlyList<DriveItemInfo> Files);

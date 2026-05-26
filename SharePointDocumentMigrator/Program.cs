@@ -35,6 +35,8 @@ try
     builder.Services.AddSingleton<TokenCredential>(serviceProvider =>
     {
         var authOptions = serviceProvider.GetRequiredService<IOptions<AuthenticationOptions>>().Value;
+        var migrationOptions = serviceProvider.GetRequiredService<IOptions<MigrationOptions>>().Value;
+
         var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Authentication");
 
         if (authOptions.UseDeviceCode)
@@ -55,26 +57,26 @@ try
         if (string.IsNullOrWhiteSpace(authOptions.ClientSecret))
             throw new InvalidOperationException("Client secret must be provided when device code authentication is disabled.");
 
-        authOptions.ApplyCustomScopes("https://graph.microsoft.com/.default");
+        if (migrationOptions.MigrationMode == MigrationMode.Graph)
+            authOptions.ApplyCustomScopes("https://graph.microsoft.com/.default");
 
         return new ClientSecretCredential(
                 authOptions.TenantId,
                 authOptions.ClientId,
                 authOptions.ClientSecret);
-
-        // NOTE: this not works
-
-        //return new InteractiveBrowserCredential(
-        //    new InteractiveBrowserCredentialOptions
-        //    {
-        //        TenantId = authOptions.TenantId,
-        //        ClientId = authOptions.ClientId
-        //    });
     });
 
     builder.Services.AddHttpClient<GraphApiClient>(client =>
     {
         client.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/");
+        client.Timeout = TimeSpan.FromMinutes(15);
+    });
+
+    // SharePointRestApiClient uses full absolute URLs — no base address needed.
+    // It authenticates against the SharePoint resource (https://{hostname}/.default)
+    // rather than Microsoft Graph, making it able to access hidden document libraries.
+    builder.Services.AddHttpClient<SharePointRestApiClient>(client =>
+    {
         client.Timeout = TimeSpan.FromMinutes(15);
     });
 

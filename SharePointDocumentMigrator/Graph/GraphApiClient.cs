@@ -20,8 +20,12 @@ public sealed class GraphApiClient(
     ILogger<GraphApiClient> logger)
 {
     private const string DISPLAY_NAME = "displayName";
-    private const string WEB_URL = "webUrl";
+    private const string FOLDER = "folder";
+    private const string ID = "id";
+    private const string MICROSOFT_GRAPH_CONFLICT_BEHAVIOR = "@microsoft.graph.conflictBehavior";
     private const string NAME = "name";
+    private const string SIZE = "size";
+    private const string WEB_URL = "webUrl";
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -52,18 +56,21 @@ public sealed class GraphApiClient(
         ListInfo list;
         DriveInfo drive;
 
-        var listFromEndpoint = await TryResolveListFromListsEndpointAsync(site.Id, options.LibraryName, cancellationToken);
+        var listFromEndpoint = await TryResolveListFromListsEndpointAsync(
+            site.Id,
+            options.LibraryName,
+            cancellationToken);
+
         if (listFromEndpoint is not null)
         {
-            // Normal path: found in /lists collection.
             list = listFromEndpoint;
             drive = await ResolveDriveAsync(site.Id, list.Id, cancellationToken);
         }
         else
         {
-            // Second attempt: direct access by URL name.
             // Hidden lists are excluded from collection queries but are often still reachable
             // via GET /sites/{id}/lists/{url-name} when the caller has sufficient permissions.
+
             _logger.LogInformation(
                 "Library '{LibraryName}' not found via /lists — trying direct URL-name access.",
                 options.LibraryName);
@@ -77,13 +84,15 @@ public sealed class GraphApiClient(
             }
             else
             {
-                // Third attempt: search /drives collection (catches libraries exposed as drives
+                // search /drives collection (catches libraries exposed as drives
                 // but hidden from /lists, common in SharePoint Publishing sites).
+
                 _logger.LogInformation(
                     "Library '{LibraryName}' not found via direct URL-name access — falling back to /drives search.",
                     options.LibraryName);
 
-                (list, drive) = await ResolveListAndDriveFromDrivesAsync(site.Id, options.LibraryName, cancellationToken);
+                (list, drive) = await ResolveListAndDriveFromDrivesAsync(
+                    site.Id, options.LibraryName, cancellationToken);
             }
         }
 
@@ -104,38 +113,9 @@ public sealed class GraphApiClient(
             ?? throw new InvalidOperationException("Graph response missing site payload.");
 
         return new SiteInfo(
-            document["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing site id."),
+            document[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing site id."),
             document[DISPLAY_NAME]?.GetValue<string>() ?? options.SitePath,
             document[WEB_URL]?.GetValue<string>() ?? string.Empty);
-    }
-
-    public async Task<ListInfo> ResolveListAsync(
-        string siteId,
-        string libraryName,
-        CancellationToken cancellationToken)
-    {
-        var list = await TryResolveListFromListsEndpointAsync(siteId, libraryName, cancellationToken);
-        if (list is not null)
-        {
-            return list;
-        }
-
-        _logger.LogInformation(
-            "Library '{LibraryName}' not found via /lists — trying direct URL-name access.",
-            libraryName);
-
-        var listByName = await TryResolveListByUrlNameAsync(siteId, libraryName, cancellationToken);
-        if (listByName is not null)
-        {
-            return listByName;
-        }
-
-        _logger.LogInformation(
-            "Library '{LibraryName}' not found via direct URL-name access — falling back to /drives search.",
-            libraryName);
-
-        var (listFromDrives, _) = await ResolveListAndDriveFromDrivesAsync(siteId, libraryName, cancellationToken);
-        return listFromDrives;
     }
 
     private async Task<ListInfo?> TryResolveListByUrlNameAsync(
@@ -158,7 +138,7 @@ public sealed class GraphApiClient(
         _logger.LogInformation("Library '{LibraryName}' resolved via direct URL-name access.", libraryName);
 
         return new ListInfo(
-            document["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list id in direct URL-name lookup."),
+            document[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list id in direct URL-name lookup."),
             document[DISPLAY_NAME]?.GetValue<string>() ?? libraryName,
             document[WEB_URL]?.GetValue<string>() ?? string.Empty);
     }
@@ -178,10 +158,8 @@ public sealed class GraphApiClient(
             string.Join(Environment.NewLine, collection.Select(n =>
                 $"  displayName='{n[DISPLAY_NAME]?.GetValue<string>()}' | webUrl='{n[WEB_URL]?.GetValue<string>()}'")));
 
-        // Match by the last segment of webUrl only (e.g. "Documents", "documenti").
-        // Matching by displayName is intentionally avoided: display names can collide with
-        // unrelated libraries (e.g. "Documenti" displayName on a library whose webUrl ends
-        // in "Documents" would shadow a hidden publishing library whose webUrl ends in "documenti").
+        // Match by the last segment of webUrl only (e.g. "Documents", "documenti") avoiding match by display names
+        // which can collide with unrelated libraries 
         var listNode = collection.FirstOrDefault(node =>
             MatchesUrlSegment(node?[WEB_URL]?.GetValue<string>(), libraryName));
 
@@ -191,7 +169,7 @@ public sealed class GraphApiClient(
         }
 
         return new ListInfo(
-            listNode["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list id."),
+            listNode[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list id."),
             listNode[DISPLAY_NAME]?.GetValue<string>() ?? libraryName,
             listNode[WEB_URL]?.GetValue<string>() ?? string.Empty);
     }
@@ -209,37 +187,31 @@ public sealed class GraphApiClient(
             siteId,
             Environment.NewLine,
             string.Join(Environment.NewLine, drives.Select(d =>
-                $"  name='{d["name"]?.GetValue<string>()}' | webUrl='{d[WEB_URL]?.GetValue<string>()}'")));
+                $"  name='{d[NAME]?.GetValue<string>()}' | webUrl='{d[WEB_URL]?.GetValue<string>()}'")));
 
         var driveNode = drives.FirstOrDefault(d =>
-            MatchesUrlSegment(d[WEB_URL]?.GetValue<string>(), libraryName));
+            MatchesUrlSegment(d[WEB_URL]?.GetValue<string>(), libraryName)) ?? throw new InvalidOperationException(
+                $"Document library '{libraryName}' was not found in site '{siteId}' via Graph API");
 
-        if (driveNode is null)
-        {
-            throw new InvalidOperationException(
-                $"Document library '{libraryName}' was not found in site '{siteId}' via /lists or /drives.");
-        }
-
-        var driveId = driveNode["id"]?.GetValue<string>()
+        var driveId = driveNode[ID]?.GetValue<string>()
             ?? throw new InvalidOperationException("Graph response missing drive id in /drives fallback.");
 
         _logger.LogInformation(
             "Found library '{LibraryName}' via /drives fallback (driveId: {DriveId}).",
             libraryName, driveId);
 
-        // Retrieve the list associated with this drive so we have the list ID for metadata operations.
         var listDocument = await GetJsonAsync($"drives/{driveId}/list?$select=id,displayName,webUrl", cancellationToken)
             ?? throw new InvalidOperationException("Graph response missing list payload in /drives fallback.");
 
         var list = new ListInfo(
-            listDocument["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list id in /drives fallback."),
+            listDocument[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list id in /drives fallback."),
             listDocument[DISPLAY_NAME]?.GetValue<string>() ?? libraryName,
             listDocument[WEB_URL]?.GetValue<string>() ?? string.Empty);
 
         // DriveInfo is built from the node already in memory — no additional API call needed.
         var drive = new DriveInfo(
             driveId,
-            driveNode["name"]?.GetValue<string>() ?? string.Empty,
+            driveNode[NAME]?.GetValue<string>() ?? string.Empty,
             driveNode[WEB_URL]?.GetValue<string>() ?? string.Empty);
 
         return (list, drive);
@@ -254,7 +226,7 @@ public sealed class GraphApiClient(
             ?? throw new InvalidOperationException("Graph response missing drive payload.");
 
         return new DriveInfo(
-            document["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing drive id."),
+            document[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing drive id."),
             document["name"]?.GetValue<string>() ?? string.Empty,
             document[WEB_URL]?.GetValue<string>() ?? string.Empty);
     }
@@ -359,7 +331,7 @@ public sealed class GraphApiClient(
     {
         var document = await GetJsonAsync($"drives/{driveId}/items/{itemId}/listItem?$select=id", cancellationToken)
             ?? throw new InvalidOperationException("Graph response missing list item payload.");
-        return document["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list item id.");
+        return document[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing list item id.");
     }
 
     public async Task UpdateListItemFieldsAsync(
@@ -416,9 +388,9 @@ public sealed class GraphApiClient(
 
             var payload = new JsonObject
             {
-                ["name"] = segment,
-                ["folder"] = new JsonObject(),
-                ["@microsoft.graph.conflictBehavior"] = "fail"
+                [NAME] = segment,
+                [FOLDER] = new JsonObject(),
+                [MICROSOFT_GRAPH_CONFLICT_BEHAVIOR] = "fail"
             };
 
             var createdFolder = await PostJsonAsync(
@@ -499,8 +471,8 @@ public sealed class GraphApiClient(
         {
             ["item"] = new JsonObject
             {
-                ["@microsoft.graph.conflictBehavior"] = overwrite ? "replace" : "fail",
-                ["name"] = Path.GetFileName(destinationRelativePath)
+                [MICROSOFT_GRAPH_CONFLICT_BEHAVIOR] = overwrite ? "replace" : "fail",
+                [NAME] = Path.GetFileName(destinationRelativePath)
             }
         };
 
@@ -740,11 +712,11 @@ public sealed class GraphApiClient(
     private static DriveItemInfo ToDriveItem(JsonObject node, string relativePath)
     {
         return new DriveItemInfo(
-            node["id"]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing drive item id."),
-            node["name"]?.GetValue<string>() ?? string.Empty,
+            node[ID]?.GetValue<string>() ?? throw new InvalidOperationException("Graph response missing drive item id."),
+            node[NAME]?.GetValue<string>() ?? string.Empty,
             PathUtilities.NormalizeRelativePath(relativePath),
-            node["folder"] is not null,
+            node[FOLDER] is not null,
             node[WEB_URL]?.GetValue<string>() ?? string.Empty,
-            node["size"]?.GetValue<long>());
+            node[SIZE]?.GetValue<long>());
     }
 }
