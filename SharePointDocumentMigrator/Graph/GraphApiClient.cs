@@ -616,7 +616,8 @@ public sealed class GraphApiClient(
         CancellationToken cancellationToken,
         bool allowNotFound = false)
     {
-        for (var attempt = 0; ; attempt++)
+        var attempt = 0;
+        while (true)
         {
             using var request = new HttpRequestMessage(method, requestUri)
             {
@@ -656,6 +657,9 @@ public sealed class GraphApiClient(
 
                 response.Dispose();
                 await Task.Delay(delay, cancellationToken);
+
+                attempt++;
+
                 continue;
             }
 
