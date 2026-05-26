@@ -7,13 +7,11 @@ namespace SharePointDocumentMigrator.Migration;
 
 public sealed class MigrationOrchestrator(
     GraphApiClient graphApiClient,
-    SharePointRestApiClient restApiClient,
     MetadataFieldSelector fieldSelector,
     IOptions<MigrationOptions> migrationOptions,
     ILogger<MigrationOrchestrator> logger)
 {
     private readonly GraphApiClient _graphApiClient = graphApiClient;
-    private readonly SharePointRestApiClient _restApiClient = restApiClient;
     private readonly MetadataFieldSelector _fieldSelector = fieldSelector;
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
@@ -23,15 +21,7 @@ public sealed class MigrationOrchestrator(
     public async Task<MigrationReport> ExecuteAsync(CancellationToken cancellationToken)
     {
         _report = new MigrationReport(_migrationOptions.DryRun);
-
-        _logger.LogInformation("Migration mode: {Mode}.", _migrationOptions.MigrationMode);
-
-        return _migrationOptions.MigrationMode switch
-        {
-            MigrationMode.Graph => await ExecuteGraphModeAsync(cancellationToken),
-            MigrationMode.Http => await ExecuteHttpModeAsync(cancellationToken),
-            _ => throw new InvalidOperationException($"Unknown migration mode: {_migrationOptions.MigrationMode}.")
-        };
+        return await ExecuteGraphModeAsync(cancellationToken);
     }
 
     private async Task<MigrationReport> ExecuteGraphModeAsync(CancellationToken cancellationToken)
@@ -116,7 +106,7 @@ public sealed class MigrationOrchestrator(
 
     private async Task<SchemaValidationResult?> ValidateSchemaAsync(ResolvedLibraryContext sourceContext, ResolvedLibraryContext targetContext)
     {
-        SchemaValidationResult res = null;
+        SchemaValidationResult? res = null;
 
         if (_migrationOptions.EnableMetadataMigration)
         {
@@ -201,113 +191,6 @@ public sealed class MigrationOrchestrator(
 
             _report.RecordMetadataUpdated();
         }
-    }
-
-    // -------------------------------------------------------------------------
-    // Http mode — source via SharePoint REST API, target via Microsoft Graph API
-    // -------------------------------------------------------------------------
-
-    private async Task<MigrationReport> ExecuteHttpModeAsync(CancellationToken cancellationToken)
-    {
-        if (_migrationOptions.EnableMetadataMigration)
-        {
-            _logger.LogWarning(
-                "Metadata migration is not supported in Http mode and will be skipped. " +
-                "Switch to Graph mode if metadata migration is required.");
-        }
-
-        // Resolve target via Graph API — standard library, no access issues.
-        _logger.LogInformation("Resolving target SharePoint location via Graph API.");
-        var targetContext = await _graphApiClient.ResolveLibraryContextAsync(_migrationOptions.Target, cancellationToken);
-
-        // Resolve source via SharePoint REST API — works for hidden/Publishing libraries.
-        var sourceHostname = _migrationOptions.Source.Hostname;
-        var sourceSiteUrl = $"https://{sourceHostname}{_migrationOptions.Source.SitePath}";
-
-        _logger.LogInformation(
-            "Resolving source library '{LibraryName}' via SharePoint REST API at '{SiteUrl}'.",
-            _migrationOptions.Source.LibraryName, sourceSiteUrl);
-
-        var sourceList = await _restApiClient.TryResolveListAsync(
-            sourceHostname, sourceSiteUrl, _migrationOptions.Source.LibraryName, cancellationToken)
-            ?? throw new InvalidOperationException(
-                $"Source library '{_migrationOptions.Source.LibraryName}' was not found via SharePoint REST API at '{sourceSiteUrl}'. " +
-                "Verify that LibraryName matches the library display title and that the app has site access.");
-
-        // sourceList.WebUrl contains the server-relative URL of the library root
-        // (e.g. /teams/intranet/it/documenti), used as the enumeration start point.
-        var (sourceFolders, sourceFiles) = await _restApiClient.EnumerateLibraryAsync(
-            sourceHostname,
-            sourceSiteUrl,
-            sourceList.WebUrl,
-            PathUtilities.NormalizeRelativePath(_migrationOptions.Source.RootFolder),
-            cancellationToken);
-
-        var targetRoot = PathUtilities.NormalizeRelativePath(_migrationOptions.Target.RootFolder);
-
-        foreach (var folder in sourceFolders)
-        {
-            var targetFolderPath = PathUtilities.CombineRelativePath(targetRoot, folder.RelativePath);
-            if (_migrationOptions.DryRun)
-            {
-                _logger.LogInformation("[DRY RUN] Folder found — source: {SourcePath} | target: {TargetPath}", folder.RelativePath, targetFolderPath);
-                _report.RecordDryRunFolder(targetFolderPath);
-
-                continue;
-            }
-
-            await _graphApiClient.EnsureFolderExistsAsync(targetContext.Drive.Id, targetFolderPath, cancellationToken);
-            _report.RecordFolderEnsured();
-        }
-
-        foreach (var file in sourceFiles)
-        {
-            var targetFilePath = PathUtilities.CombineRelativePath(targetRoot, file.RelativePath);
-
-            try
-            {
-                if (_migrationOptions.DryRun)
-                {
-                    _logger.LogInformation("Source file name: {SourceFile}. Url: {WebUrl}", file.RelativePath, file.WebUrl);
-                    _report.RecordDryRunFile(targetFilePath);
-
-                    continue;
-                }
-
-                await _graphApiClient.EnsureFolderExistsAsync(
-                    targetContext.Drive.Id,
-                    PathUtilities.GetParentPath(targetFilePath),
-                    cancellationToken);
-
-                // Download from source using the absolute file URL via SharePoint REST API bearer token.
-                using var temporaryFile = TemporaryFile.Create(Path.GetExtension(file.Name));
-                await _restApiClient.DownloadFileAsync(sourceHostname, file.WebUrl, temporaryFile.Path, cancellationToken);
-
-                // Upload to target via Graph API.
-                var uploadResult = await _graphApiClient.UploadFileAsync(
-                    targetContext.Drive.Id,
-                    targetFilePath,
-                    temporaryFile.Path,
-                    _migrationOptions.OverwriteExistingFiles,
-                    cancellationToken);
-
-                if (uploadResult.WasSkipped)
-                {
-                    _report.RecordSkippedFile(targetFilePath);
-                    continue;
-                }
-
-                _report.RecordMigratedFile(targetFilePath);
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "Failed to migrate '{RelativePath}'.", file.RelativePath);
-                _report.RecordFailure(file.RelativePath, exception.Message);
-            }
-        }
-
-        _logger.LogInformation(_report.PrintReport());
-        return _report;
     }
 
     private sealed record LibraryInventory(IReadOnlyList<DriveItemInfo> Folders, IReadOnlyList<DriveItemInfo> Files);
