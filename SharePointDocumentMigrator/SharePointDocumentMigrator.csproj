@@ -16,7 +16,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Base config always copied -->
     <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Environment-specific overrides (appsettings.Development.json, appsettings.Production.json, ...) -->
+    <None Update="appsettings.*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
