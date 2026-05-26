@@ -1,100 +1,156 @@
 # SharePoint Document Migrator
 
-Console application `.NET 10` in C# per migrare documenti da una document library SharePoint a un'altra, nello stesso tenant Microsoft 365, preservando il contenuto dei file e i metadati scrivibili compatibili.
+A .NET 10 console application that migrates documents between SharePoint Online document libraries **within the same Microsoft 365 tenant** via the Microsoft Graph API, preserving the full folder structure and — optionally — column metadata.
 
-## Cosa fa
+## What it does
 
-- accede a SharePoint tramite **login interattivo** (`Device Code` di default, oppure browser interattivo)
-- legge una singola document library sorgente per esecuzione
-- ricrea la struttura cartelle nel target
-- copia i file nel target
-- valida che source e target abbiano **schema colonne compatibile**
-- riscrive i metadati SharePoint aggiornabili tramite Microsoft Graph
-- supporta `dry-run`, retry su errori Graph transienti e upload chunked per file oltre 4 MB
+The tool performs a one-way migration from a **source** SharePoint library to a **target** library:
 
-## Limiti noti
+1. **Resolves** source and target libraries by site path and library name.
+2. **Enumerates** the full folder tree and file list of the source, starting from an optional root subfolder.
+3. **Recreates** the folder structure on the target.
+4. **Downloads** each source file to a local temporary file, then **uploads** it to the target using Graph's chunked upload session (handles large files automatically).
+5. **Migrates metadata** (column values) from the source list item to the target list item after each upload, with optional field name remapping between the two libraries.
 
-- alcuni metadati di sistema SharePoint/Microsoft 365 restano di sola lettura e non possono essere ripristinati via API
-- la prima versione assume **stesso schema colonne** tra libreria sorgente e libreria destinazione
-- il tool lavora su **una sola document library per job**
+Files that already exist on the target can be skipped or overwritten depending on configuration.  
+A **dry-run mode** lets you preview the full migration plan without making any changes.
 
-## Prerequisiti
+Transient Graph API errors (429, 502, 503, 504) are retried automatically with exponential backoff, honouring the `Retry-After` response header when present.
 
-1. SDK `.NET 10`
-2. App registration Microsoft Entra ID configurata come **public client**
-3. Permessi delegati Microsoft Graph almeno:
-   - `Sites.ReadWrite.All`
-   - `Files.ReadWrite.All`
-   - `User.Read`
-4. Consenso amministrativo, se richiesto dalla tenant policy
+---
 
-## Configurazione
+## Requirements
 
-Modifica `src\SharePointDocumentMigrator\appsettings.json` oppure passa i valori via command line / environment variables.
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- An **Azure AD application registration** with the following Microsoft Graph **application** permissions granted and admin-consented:
+  - `Sites.ReadWrite.All`
+  - `Files.ReadWrite.All`
 
-Esempio:
+---
+
+## Configuration
+
+All settings live in `appsettings.json` inside the project folder. Sensitive values (tenant ID, client secret, etc.) should be placed in an environment-specific override file — e.g. `appsettings.Development.json` — which is merged on top of the base file at startup and should not be committed to source control.
+
+The active environment is selected via the `DOTNET_ENVIRONMENT` environment variable (defaults to `Production`). Launch profiles are defined in `Properties/launchSettings.json`.
+
+### Authentication section
 
 ```json
-{
-  "Authentication": {
-    "TenantId": "YOUR-TENANT-ID",
-    "ClientId": "YOUR-APP-ID",
-    "UseDeviceCode": true,
-    "Scopes": [
-      "https://graph.microsoft.com/Sites.ReadWrite.All",
-      "https://graph.microsoft.com/Files.ReadWrite.All",
-      "https://graph.microsoft.com/User.Read"
-    ]
-  },
-  "Migration": {
-    "Source": {
-      "Hostname": "contoso.sharepoint.com",
-      "SitePath": "/sites/SourceSite",
-      "LibraryName": "Documents",
-      "RootFolder": ""
-    },
-    "Target": {
-      "Hostname": "contoso.sharepoint.com",
-      "SitePath": "/sites/TargetSite",
-      "LibraryName": "Documents",
-      "RootFolder": ""
-    },
-    "DryRun": true,
-    "OverwriteExistingFiles": false,
-    "MaxRetryCount": 5,
-    "UploadChunkSizeKiB": 3200
-  }
+"Authentication": {
+  "TenantId": "<azure-ad-tenant-guid>",
+  "ClientId": "<app-registration-client-id>",
+  "UseDeviceCode": false,
+  "ClientSecret": "<client-secret>"
 }
 ```
 
-### Parametri principali
+| Property | Description |
+|---|---|
+| `TenantId` | Azure AD tenant GUID. |
+| `ClientId` | Client ID of the app registration. |
+| `UseDeviceCode` | `true` — interactive device-code flow (opens a browser prompt, useful for testing). `false` — client credentials flow (app-only, for unattended runs). |
+| `ClientSecret` | Required when `UseDeviceCode` is `false`. |
 
-| Chiave | Significato |
-| --- | --- |
-| `Source.Hostname` / `Target.Hostname` | Host SharePoint, ad esempio `contoso.sharepoint.com` |
-| `SitePath` | Percorso relativo del sito, ad esempio `/sites/Finance` |
-| `LibraryName` | Nome visualizzato della document library |
-| `RootFolder` | Sottocartella opzionale da usare come radice della migrazione |
-| `DryRun` | Se `true`, non scrive nulla sul target |
-| `OverwriteExistingFiles` | Se `true`, sostituisce i file gia' presenti |
-| `UploadChunkSizeKiB` | Chunk size per upload session, multiplo positivo di `320` |
+### Migration section
 
-## Esecuzione
-
-```powershell
-dotnet run --project .\src\SharePointDocumentMigrator\SharePointDocumentMigrator.csproj
+```json
+"Migration": {
+  "Source": {
+    "Hostname": "contoso.sharepoint.com",
+    "SitePath": "/sites/source-site",
+    "LibraryName": "Documents",
+    "RootFolder": "Archive/2023"
+  },
+  "Target": {
+    "Hostname": "contoso.sharepoint.com",
+    "SitePath": "/sites/target-site",
+    "LibraryName": "Documents",
+    "RootFolder": ""
+  },
+  "DryRun": true,
+  "OverwriteExistingFiles": false,
+  "EnableMetadataMigration": false,
+  "MetadataFieldMappings": {},
+  "MaxRetryCount": 5,
+  "UploadChunkSizeKiB": 3200
+}
 ```
 
-Per un override rapido:
+#### Source / Target location
 
-```powershell
-dotnet run --project .\src\SharePointDocumentMigrator\SharePointDocumentMigrator.csproj -- `
-  --Migration:DryRun=false `
-  --Migration:OverwriteExistingFiles=true
+Both `Source` and `Target` share the same four properties:
+
+| Property | Description |
+|---|---|
+| `Hostname` | SharePoint tenant hostname, e.g. `contoso.sharepoint.com`. |
+| `SitePath` | Server-relative path of the site, e.g. `/sites/my-site` or `/teams/department/it`. |
+| `LibraryName` | Display name of the document library. |
+| `RootFolder` | Optional subfolder within the library used as the migration root. Leave empty to migrate the entire library. |
+
+#### Migration behaviour
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `DryRun` | bool | `true` | When `true`, enumerates source items and logs what would happen without touching the target. **Always start with a dry run.** |
+| `OverwriteExistingFiles` | bool | `false` | When `false`, files already present on the target are skipped. When `true`, they are overwritten. |
+| `EnableMetadataMigration` | bool | `false` | When `true`, column values from each source list item are written to the corresponding target list item after upload. Source and target schemas are validated for compatibility before the migration starts and the tool aborts if they are incompatible. |
+| `MetadataFieldMappings` | object | `{}` | Maps source internal field names to different target internal field names. Fields not listed here are assumed to share the same internal name in both libraries. Example: `{ "CategoriaProgetto": "Category" }`. |
+| `MaxRetryCount` | int | `5` | Maximum number of retry attempts for transient Graph API errors. |
+| `UploadChunkSizeKiB` | int | `3200` | Upload chunk size in KiB. Must be a positive multiple of `320` (Graph API requirement). |
+
+---
+
+## Running the application
+
+```bash
+# Dry run — safe, no changes written to the target
+dotnet run --project SharePointDocumentMigrator
+
+# Specify an environment (loads appsettings.Production.json overrides)
+DOTNET_ENVIRONMENT=Production dotnet run --project SharePointDocumentMigrator
+
+# Publish and run the binary directly
+dotnet publish -c Release -o ./publish
+./publish/SharePointDocumentMigrator
 ```
 
-## Test
+Press **Ctrl+C** at any time to cancel. The in-progress upload is abandoned and the process exits cleanly.
 
-```powershell
-dotnet test .\SharePointDocumentMigrator.slnx
+---
+
+## Output
+
+The application writes structured log messages to the console throughout execution.
+
+### During migration
+
+| Event | Level | Sample message |
+|---|---|---|
+| Dry-run file found | `Information` | `Source file name: Reports/Q1.xlsx. Url: https://...` |
+| Dry-run folder found | `Information` | `[DRY RUN] Folder found — source: Reports | target: Reports` |
+| Transient error, retrying | `Warning` | `Graph request failed with 429. Retrying (attempt 1/5) in 00:00:02.` |
+| File failed permanently | `Error` | `Failed to migrate 'Reports/Q1.xlsx'.` + exception detail |
+
+Failed files are logged individually and **do not stop the migration** — the tool continues with the remaining files.
+
+### Final summary
+
+At the end of every run, a single summary line is logged at `Information` level.
+
+**Dry run:**
 ```
+Dry run completed. Planned files: 142, planned folders: 18.
+```
+
+**Live run:**
+```
+Migration completed. Migrated files: 138, skipped: 3, failures: 1, updated metadata: 138, folders created: 18.
+```
+
+### Exit code
+
+| Code | Meaning |
+|---|---|
+| `0` | Run completed with no failures (includes successful dry runs). |
+| `1` | One or more files failed to migrate, or a startup/configuration error occurred. |

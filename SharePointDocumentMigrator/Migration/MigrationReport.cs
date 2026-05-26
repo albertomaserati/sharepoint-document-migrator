@@ -37,6 +37,6 @@ public sealed class MigrationReport(bool dryRun)
         _failures.Add(new FileFailure(relativePath, errorMessage));
 
     public string PrintReport() => DryRun
-        ? $"Dry run completato. File pianificati: {PlannedFiles}, cartelle pianificate: {PlannedFolders}."
-        : $"Migrazione completata. Migrati: {MigratedFiles}, saltati: {SkippedFiles}, falliti: {FailedFiles}, metadata aggiornati: {MetadataUpdated}, cartelle create: {FoldersEnsured}.";
+        ? $"Dry run completed. Planned files: {PlannedFiles}, planned folders: {PlannedFolders}."
+        : $"Migration completed. Migrated files: {MigratedFiles}, skipped: {SkippedFiles}, failures: {FailedFiles}, updated metadata: {MetadataUpdated}, folders created: {FoldersEnsured}.";
 }
