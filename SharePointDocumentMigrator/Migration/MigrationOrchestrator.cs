@@ -14,6 +14,8 @@ public sealed class MigrationOrchestrator(
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
 
+    private static readonly Regex VersionSuffixRegex = new(@"_V\d+(\.[^.]+)$", RegexOptions.Compiled);
+
     private MigrationReport _report = null!;
 
     public async Task<MigrationReport> ExecuteAsync(CancellationToken cancellationToken)
@@ -47,7 +49,7 @@ public sealed class MigrationOrchestrator(
 
         foreach (DriveItemInfo file in inventory.Files)
         {
-            string targetFilePath = PathUtilities.CombineRelativePath(targetRoot, file.RelativePath);
+            string targetFilePath = PathUtilities.CombineRelativePath(targetRoot, ConvertTitle(file.RelativePath));
 
             try
             {
@@ -110,6 +112,9 @@ public sealed class MigrationOrchestrator(
         _logger.LogInformation(_report.PrintReport());
         return _report;
     }
+
+    private static string ConvertTitle(string sourceFileRelativePath) =>
+        VersionSuffixRegex.Replace(sourceFileRelativePath, "$1");
 
     private async Task<SchemaValidationResult?> ValidateSchemaAsync(ResolvedLibraryContext sourceContext, ResolvedLibraryContext targetContext)
     {
