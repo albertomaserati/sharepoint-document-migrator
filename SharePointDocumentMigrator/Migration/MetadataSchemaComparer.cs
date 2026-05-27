@@ -17,7 +17,27 @@ public static class MetadataSchemaComparer
         "ID",
         "Modified",
         "ContentType",
-        "ContentTypeId"
+        "ContentTypeId",
+        // Teoresi Custom FIelds
+        "Documentazione_x0020_Relativa_x0020_a",
+        "Riservato_a",
+        "Norma",
+        "Vers_x002e_",
+        "RoutingTargetFolder",
+        "recuperaNome",
+        "WF_copyName",
+        "EntiUtilizzatori",
+        "EnteArchiviante",
+        "PeriodoDiArchiviazione",
+        "DocRegistrQualita"
+    };
+
+    private static readonly List<string> AllowedTypeMissmatch = new()
+    {
+        "Teoresi_x0020_Legal_x0020_Entity",
+        "Language",
+        "Document_x0020_type",
+        "Reference_x0020_process"
     };
 
     public static async Task<SchemaValidationResult> CompareAsync(
@@ -45,7 +65,8 @@ public static class MetadataSchemaComparer
                 continue;
             }
 
-            if (!string.Equals(sourceColumn.Type, targetColumn.Type, StringComparison.OrdinalIgnoreCase))
+            if (!AllowedTypeMissmatch.Contains(targetColumn.InternalName)
+                && !string.Equals(sourceColumn.Type, targetColumn.Type, StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add(
                     $"Column '{sourceColumn.InternalName}' → '{targetName}' has incompatible types: source '{sourceColumn.Type}', target '{targetColumn.Type}'.");
