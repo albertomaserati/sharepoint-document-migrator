@@ -69,6 +69,7 @@ try
         client.Timeout = TimeSpan.FromMinutes(15);
     });
 
+    builder.Services.AddSingleton<IMigrationCustomizations, MigrationCustomizations>();
     builder.Services.AddSingleton<MigrationOrchestrator>();
 
     using var host = builder.Build();

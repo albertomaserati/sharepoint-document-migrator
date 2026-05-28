@@ -35,7 +35,8 @@ public static class MetadataFieldSelector
     public static MetadataSelectionResult SelectUpdatableFields(
         JsonObject fields,
         IReadOnlyDictionary<string, SharePointColumnDefinition> writableColumns,
-        IReadOnlyDictionary<string, string>? fieldMappings = null)
+        IReadOnlyDictionary<string, string>? fieldMappings = null,
+        Func<string, JsonNode?, JsonNode?>? fieldValueTransformer = null)
     {
         var selectedFields = new JsonObject();
         var skippedFields = new List<string>();
@@ -57,9 +58,11 @@ public static class MetadataFieldSelector
                 ? mapped
                 : property.Key;
 
-            selectedFields[targetKey] = property.Value.DeepClone();
+            var value = fieldValueTransformer?.Invoke(targetKey, property.Value) ?? property.Value?.DeepClone();
+            selectedFields[targetKey] = value;
         }
 
         return new MetadataSelectionResult(selectedFields, skippedFields);
     }
+
 }

@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharePointDocumentMigrator.Graph;
@@ -8,14 +7,14 @@ namespace SharePointDocumentMigrator.Migration;
 
 public sealed class MigrationOrchestrator(
     GraphApiClient graphApiClient,
+    IMigrationCustomizations customizations,
     IOptions<MigrationOptions> migrationOptions,
     ILogger<MigrationOrchestrator> logger)
 {
     private readonly GraphApiClient _graphApiClient = graphApiClient;
+    private readonly IMigrationCustomizations _customizations = customizations;
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<MigrationOrchestrator> _logger = logger;
-
-    private static readonly Regex VersionSuffixRegex = new(@"_V\d+(\.[^.]+)$", RegexOptions.Compiled);
 
     private MigrationReport _report = null!;
 
@@ -50,7 +49,7 @@ public sealed class MigrationOrchestrator(
 
         foreach (DriveItemInfo file in inventory.Files)
         {
-            string targetFilePath = PathUtilities.CombineRelativePath(targetRoot, ConvertTitle(file.RelativePath));
+            string targetFilePath = PathUtilities.CombineRelativePath(targetRoot, _customizations.TransformTargetPath(file.RelativePath));
 
             try
             {
@@ -113,9 +112,6 @@ public sealed class MigrationOrchestrator(
         _logger.LogInformation(_report.PrintReport());
         return _report;
     }
-
-    private static string ConvertTitle(string sourceFileRelativePath) =>
-        VersionSuffixRegex.Replace(sourceFileRelativePath, "$1");
 
     private async Task<SchemaValidationResult?> ValidateSchemaAsync(ResolvedLibraryContext sourceContext, ResolvedLibraryContext targetContext)
     {
@@ -193,7 +189,8 @@ public sealed class MigrationOrchestrator(
         var selectedMetadata = MetadataFieldSelector.SelectUpdatableFields(
             sourceFields,
             schemaValidation.WritableColumns,
-            _migrationOptions.MetadataFieldMappings);
+            _migrationOptions.MetadataFieldMappings,
+            _customizations.TransformFieldValue);
 
         if (selectedMetadata.Fields.Count > 0)
         {
