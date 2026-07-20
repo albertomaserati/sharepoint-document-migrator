@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharePointDocumentMigrator.Graph;
+using SharePointDocumentMigrator.Logging;
 using SharePointDocumentMigrator.Migration;
 using SharePointDocumentMigrator.Options;
 
@@ -18,6 +19,10 @@ Console.CancelKeyPress += (_, args) =>
 try
 {
     var builder = Host.CreateApplicationBuilder(args);
+
+    var logDirectory = builder.Configuration["Logging:File:Directory"] ?? "logs";
+    var logFilePath = Path.Combine(AppContext.BaseDirectory, logDirectory, $"migration-{DateTime.Now:yyyyMMdd}.log");
+    builder.Logging.AddProvider(new FileLoggerProvider(logFilePath));
 
     builder.Services
         .AddOptions<AuthenticationOptions>()

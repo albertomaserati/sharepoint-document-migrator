@@ -8,13 +8,16 @@ public sealed record ListInfo(string Id, string DisplayName, string WebUrl);
 
 public sealed record DriveInfo(string Id, string Name, string WebUrl);
 
+public sealed record LookupInfo(string ListId, string ColumnName, bool AllowMultipleValues);
+
 public sealed record SharePointColumnDefinition(
     string InternalName,
     string DisplayName,
     string Type,
     bool Hidden,
     bool ReadOnly,
-    bool Required);
+    bool Required,
+    LookupInfo? Lookup = null);
 
 public sealed record DriveItemInfo(
     string Id,

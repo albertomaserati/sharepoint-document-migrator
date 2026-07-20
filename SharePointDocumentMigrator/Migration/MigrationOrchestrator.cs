@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharePointDocumentMigrator.Graph;
 using SharePointDocumentMigrator.Options;
+using System.Text.Json.Nodes;
 
 namespace SharePointDocumentMigrator.Migration;
 
@@ -186,6 +187,7 @@ public sealed class MigrationOrchestrator(
         CancellationToken cancellationToken)
     {
         var sourceFields = await _graphApiClient.GetListItemFieldsAsync(sourceContext.Drive.Id, file.Id, cancellationToken);
+
         var selectedMetadata = MetadataFieldSelector.SelectUpdatableFields(
             sourceFields,
             schemaValidation.WritableColumns,
@@ -199,16 +201,88 @@ public sealed class MigrationOrchestrator(
                 uploadResult.Item.Id,
                 cancellationToken);
 
-            await _graphApiClient.UpdateListItemFieldsAsync(
-                targetContext.Site.Id,
-                targetContext.List.Id,
-                targetListItemId,
+            var resolvedFields = await ResolveLookupFieldsAsync(
                 selectedMetadata.Fields,
+                targetContext.Site.Id,
+                targetContext.Columns,
                 cancellationToken);
 
-            _report.RecordMetadataUpdated();
+            if (resolvedFields.Count > 0)
+            {
+                await _graphApiClient.UpdateListItemFieldsAsync(
+                    targetContext.Site.Id,
+                    targetContext.List.Id,
+                    targetListItemId,
+                    resolvedFields,
+                    cancellationToken);
+
+                _report.RecordMetadataUpdated();
+            }
         }
     }
+
+    /// <summary>
+    /// Replaces lookup-type fields in <paramref name="fields"/> with their integer
+    /// <c>{FieldName}LookupId</c> equivalents required by the Graph PATCH endpoint.
+    /// Non-lookup fields are passed through unchanged.
+    /// </summary>
+    private async Task<JsonObject> ResolveLookupFieldsAsync(
+        JsonObject fields,
+        string siteId,
+        IReadOnlyList<SharePointColumnDefinition> targetColumns,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, SharePointColumnDefinition> columnsByName =
+            targetColumns.ToDictionary(c => c.InternalName, StringComparer.OrdinalIgnoreCase);
+
+        JsonObject result = [];
+
+        foreach (var property in fields)
+        {
+            if (!columnsByName.TryGetValue(property.Key, out SharePointColumnDefinition? column)
+                || column.Lookup is null)
+            {
+                result[property.Key] = property.Value?.DeepClone();
+                continue;
+            }
+
+            string? displayValue = ExtractDisplayValue(property.Value);
+
+            if (string.IsNullOrEmpty(displayValue))
+            {
+                _logger.LogDebug("Skipping lookup field '{Field}': value is empty.", property.Key);
+                continue;
+            }
+
+            int? lookupId = await _graphApiClient.ResolveLookupIdAsync(
+                siteId,
+                column.Lookup,
+                displayValue,
+                cancellationToken);
+
+            if (lookupId is null)
+            {
+                _logger.LogWarning(
+                    "Could not resolve lookup value '{Value}' for field '{Field}' — field will be skipped.",
+                    displayValue,
+                    property.Key);
+
+                continue;
+            }
+
+            result[$"{property.Key}LookupId"] = lookupId.Value;
+        }
+
+        return result;
+    }
+
+    private static string? ExtractDisplayValue(JsonNode? value) =>
+        value switch
+        {
+            JsonValue v when v.TryGetValue<string>(out var s) => s,
+            JsonArray { Count: > 0 } arr => arr[0]?.GetValue<string>(),
+            _ => null
+        };
 
     private sealed record LibraryInventory(IReadOnlyList<DriveItemInfo> Folders, IReadOnlyList<DriveItemInfo> Files);
 }

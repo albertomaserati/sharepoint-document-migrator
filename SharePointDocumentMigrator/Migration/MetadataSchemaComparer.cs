@@ -22,7 +22,6 @@ public static class MetadataSchemaComparer
         "Documentazione_x0020_Relativa_x0020_a",
         "Riservato_a",
         "Norma",
-        "Vers_x002e_",
         "RoutingTargetFolder",
         "recuperaNome",
         "WF_copyName",

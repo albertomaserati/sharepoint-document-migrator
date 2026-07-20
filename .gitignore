@@ -363,6 +363,7 @@ MigrationBackup/
 FodyWeavers.xsd
 
 #Rider
+.idea/
 */.idea
 
 # launchsettings to handle environment variables

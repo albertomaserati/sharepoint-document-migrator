@@ -78,4 +78,106 @@ public sealed class MetadataFieldSelectorTests
         Assert.True(result.Fields.ContainsKey("Title"));
         Assert.Equal("Doc", result.Fields["Title"]?.GetValue<string>());
     }
+
+    [Fact]
+    public void SelectUpdatableFields_SkipsFieldsWithNullValue()
+    {
+        var fields = new JsonObject
+        {
+            ["Title"]    = "Doc",
+            ["NullField"] = (JsonNode?)null
+        };
+
+        var writableColumns = new Dictionary<string, SharePointColumnDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Title"]     = new("Title",     "Title",      "text", Hidden: false, ReadOnly: false, Required: false),
+            ["NullField"] = new("NullField", "Null Field", "text", Hidden: false, ReadOnly: false, Required: false)
+        };
+
+        var result = MetadataFieldSelector.SelectUpdatableFields(fields, writableColumns);
+
+        // null-valued field is silently skipped (not in Fields, not in SkippedFields)
+        Assert.Single(result.Fields);
+        Assert.True(result.Fields.ContainsKey("Title"));
+        Assert.False(result.Fields.ContainsKey("NullField"));
+    }
+
+    [Fact]
+    public void SelectUpdatableFields_SkipsAtPrefixedKeys()
+    {
+        var fields = new JsonObject
+        {
+            ["Title"]           = "Doc",
+            ["@odata.type"]     = "SP.Data.Item",
+            ["@odata.editLink"] = "https://example.com"
+        };
+
+        var writableColumns = new Dictionary<string, SharePointColumnDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Title"] = new("Title", "Title", "text", Hidden: false, ReadOnly: false, Required: false)
+        };
+
+        var result = MetadataFieldSelector.SelectUpdatableFields(fields, writableColumns);
+
+        Assert.Single(result.Fields);
+        Assert.True(result.Fields.ContainsKey("Title"));
+    }
+
+    [Fact]
+    public void SelectUpdatableFields_AppliesValueTransformer_AndUsesReturnValue()
+    {
+        var fields = new JsonObject { ["Category"] = "original" };
+
+        var writableColumns = new Dictionary<string, SharePointColumnDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Category"] = new("Category", "Category", "choice", Hidden: false, ReadOnly: false, Required: false)
+        };
+
+        var result = MetadataFieldSelector.SelectUpdatableFields(
+            fields,
+            writableColumns,
+            fieldValueTransformer: (_, _) => JsonValue.Create("transformed"));
+
+        Assert.Equal("transformed", result.Fields["Category"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void SelectUpdatableFields_ValueTransformer_ReceivesTargetKeyAfterMapping()
+    {
+        var fields = new JsonObject { ["SourceField"] = "value" };
+
+        var writableColumns = new Dictionary<string, SharePointColumnDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["SourceField"] = new("SourceField", "Source", "text", Hidden: false, ReadOnly: false, Required: false)
+        };
+
+        var mappings = new Dictionary<string, string> { ["SourceField"] = "TargetField" };
+
+        string? receivedKey = null;
+        MetadataFieldSelector.SelectUpdatableFields(
+            fields,
+            writableColumns,
+            mappings,
+            fieldValueTransformer: (key, val) => { receivedKey = key; return val?.DeepClone(); });
+
+        Assert.Equal("TargetField", receivedKey);
+    }
+
+    [Fact]
+    public void SelectUpdatableFields_WithNoMappingsArgument_UsesOriginalKeys()
+    {
+        var fields = new JsonObject { ["Title"] = "Doc", ["Score"] = "42" };
+
+        var writableColumns = new Dictionary<string, SharePointColumnDefinition>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Title"] = new("Title", "Title", "text",   Hidden: false, ReadOnly: false, Required: false),
+            ["Score"] = new("Score", "Score", "number", Hidden: false, ReadOnly: false, Required: false)
+        };
+
+        var result = MetadataFieldSelector.SelectUpdatableFields(fields, writableColumns);
+
+        Assert.True(result.Fields.ContainsKey("Title"));
+        Assert.True(result.Fields.ContainsKey("Score"));
+        Assert.Empty(result.SkippedFields);
+    }
 }

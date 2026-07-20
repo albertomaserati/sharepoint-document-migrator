@@ -46,6 +46,7 @@ public sealed class GraphApiClient(
     private readonly MigrationOptions _migrationOptions = migrationOptions.Value;
     private readonly ILogger<GraphApiClient> _logger = logger;
     private readonly ConcurrentDictionary<string, DriveItemInfo> _folderCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Dictionary<string, int>> _lookupListCache = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<ResolvedLibraryContext> ResolveLibraryContextAsync(
         SharePointLocationOptions options,
@@ -240,13 +241,26 @@ public sealed class GraphApiClient(
         var collection = await GetCollectionAsync(requestUri, cancellationToken);
 
         return [.. collection
-            .Select(column => new SharePointColumnDefinition(
-                column["name"]?.GetValue<string>() ?? string.Empty,
-                column[DISPLAY_NAME]?.GetValue<string>() ?? string.Empty,
-                DetermineColumnType(column),
-                column["hidden"]?.GetValue<bool>() ?? false,
-                column["readOnly"]?.GetValue<bool>() ?? false,
-                column["required"]?.GetValue<bool>() ?? false))
+            .Select(column =>
+            {
+                LookupInfo? lookupInfo = null;
+                if (column["lookup"] is JsonObject lookupObj)
+                {
+                    lookupInfo = new LookupInfo(
+                        lookupObj["listId"]?.GetValue<string>() ?? string.Empty,
+                        lookupObj["columnName"]?.GetValue<string>() ?? "Title",
+                        lookupObj["allowMultipleValues"]?.GetValue<bool>() ?? false);
+                }
+
+                return new SharePointColumnDefinition(
+                    column[NAME]?.GetValue<string>() ?? string.Empty,
+                    column[DISPLAY_NAME]?.GetValue<string>() ?? string.Empty,
+                    DetermineColumnType(column),
+                    column["hidden"]?.GetValue<bool>() ?? false,
+                    column["readOnly"]?.GetValue<bool>() ?? false,
+                    column["required"]?.GetValue<bool>() ?? false,
+                    lookupInfo);
+            })
             .Where(column => !string.IsNullOrWhiteSpace(column.InternalName))];
     }
 
@@ -346,6 +360,52 @@ public sealed class GraphApiClient(
             $"sites/{siteId}/lists/{listId}/items/{listItemId}/fields",
             () => new StringContent(payload, Encoding.UTF8, "application/json"),
             cancellationToken);
+    }
+
+    public async Task<int?> ResolveLookupIdAsync(
+        string siteId,
+        LookupInfo lookupInfo,
+        string displayValue,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = $"{siteId}:{lookupInfo.ListId}";
+
+        if (!_lookupListCache.TryGetValue(cacheKey, out var lookupMap))
+        {
+            lookupMap = await FetchLookupListAsync(siteId, lookupInfo.ListId, cancellationToken);
+            _lookupListCache.TryAdd(cacheKey, lookupMap);
+        }
+
+        return lookupMap.TryGetValue(displayValue, out var id) ? id : null;
+    }
+
+    private async Task<Dictionary<string, int>> FetchLookupListAsync(
+        string siteId,
+        string listId,
+        CancellationToken cancellationToken)
+    {
+        var requestUri = $"sites/{siteId}/lists/{listId}/items?$expand=fields($select=Title)&$select=id";
+        var items = await GetCollectionAsync(requestUri, cancellationToken);
+
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            if (!int.TryParse(item["id"]?.GetValue<string>(), out var id))
+                continue;
+
+            var fields = item["fields"] as JsonObject;
+            var title = fields?["Title"]?.GetValue<string>();
+
+            if (!string.IsNullOrEmpty(title))
+                result.TryAdd(title, id);
+        }
+
+        _logger.LogDebug(
+            "Fetched {Count} items from lookup list '{ListId}' in site '{SiteId}'.",
+            result.Count, listId, siteId);
+
+        return result;
     }
 
     public async Task EnsureFolderExistsAsync(

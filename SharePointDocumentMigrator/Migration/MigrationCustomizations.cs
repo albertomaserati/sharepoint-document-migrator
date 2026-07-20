@@ -22,32 +22,20 @@ public sealed partial class MigrationCustomizations : IMigrationCustomizations
     /// <inheritdoc/>
     public JsonNode? TransformFieldValue(string fieldName, JsonNode? value)
     {
-        //var res = property.Value?.DeepClone();
-
-        //if (targetKey == "Reference_x0020_process")
-        //{
-        //    string process = MapEnteEmittenteToReferenceProcess(property.Value[0].GetValue<string>());
-
-        //    res[0] = process;
-        //}
-
-        //return res;
-
         var res = value?.DeepClone();
 
-        if (fieldName == "Reference_x0020_process" && value is JsonArray arr && arr.Count > 0)
+        if (fieldName == "Reference_x0020_process")
         {
-            var originalValue = arr[0]?.GetValue<string>();
+            string raw = string.Empty;
 
-            if (!string.IsNullOrEmpty(originalValue))
-            {
-                var mapped = MapEnteEmittenteToReferenceProcess(originalValue);
+            if (value is JsonArray arr && arr.Count > 0)
+                raw = arr[0]?.GetValue<string>() ?? string.Empty;
 
-                if (res is JsonArray resArray && resArray.Count > 0)
-                {
-                    resArray[0] = JsonValue.Create(mapped);
-                }
-            }
+            res = JsonValue.Create(MapEnteEmittenteToReferenceProcess(raw));
+        }
+        else if (fieldName == "Document_x0020_type")
+        {
+            res = JsonValue.Create(value?.GetValue<string>() ?? string.Empty);
         }
 
         return res;
